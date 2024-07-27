@@ -4,25 +4,14 @@
 library(shiny)
 
 ui <- fluidPage(
-  titlePanel("Prototype"),
+  titlePanel("Upload Multiple Text Files with Metadata"),
   
-  sidebarLayout(
-    sidebarPanel(
-      width = 2,
-      fileInput(
-        "data",
-        "Choose Monitor Files",
-        multiple = TRUE,
-        accept = c(
-          "text/csv",
-          "text/comma-separated-values,text/plain",
-          ".csv"
-        )
-      )
-    ),
-    
-    mainPanel(
-      # Main content can go here if needed
-    )
-  )
+  fileInput("file1", "Choose Text Files", multiple = TRUE, accept = c("text/plain", ".txt")),
+  actionButton("submit", "Submit"),
+  
+  h3("Enter Metadata"),
+  uiOutput("metadata_inputs"),
+  
+  h3("Saved Files Metadata"),
+  tableOutput("saved_files")
 )
