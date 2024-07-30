@@ -13,7 +13,8 @@ options(shiny.maxRequestSize=30*1024^2)
 server <- function(input, output, session) {
   # Reactive value to store uploaded file names and metadata
   uploaded_files <- reactiveVal(NULL)
-  metadata <- reactiveVal(data.frame())
+  metadata_proc <- reactiveVal(data.frame())
+  batch_title <- reactiveVal()
 
   observe({
   
@@ -60,59 +61,48 @@ server <- function(input, output, session) {
       files <- input$file1
       num_files <- nrow(files)
       
-  metadata_list <- lapply(1:num_files, function(i) {
-    # Extract the monitor name from the file name
-    file_name <- files$name[i]
-    monitor_name <- paste0(substr(file_name, 1, 1), substr(file_name, 8, nchar(file_name) - 4))
-    
-    lapply(1:32, function(region_id) {
-      # Combine date and time inputs and format as POSIXct
-      start_date <- input[[paste0("start_date_", i)]]
-      start_time <- input[[paste0("start_time_", i)]]
-      stop_date <- input[[paste0("stop_date_", i)]]
-      stop_time <- input[[paste0("stop_time_", i)]]
-      
-      start_datetime <- ifelse(
-        is.na(start_time) || start_time == "",
-        as.character(start_date),
-        format(as.POSIXct(paste(start_date, start_time), format="%Y-%m-%d %H:%M:%S"), "%Y-%m-%d %H:%M:%S")
-      )
-      
-      stop_datetime <- ifelse(
-        is.na(stop_time) || stop_time == "",
-        as.character(stop_date),
-        format(as.POSIXct(paste(stop_date, stop_time), format="%Y-%m-%d %H:%M:%S"), "%Y-%m-%d %H:%M:%S")
-      )
-      
-      list(
-        file = files$name[i],
-        monitor = monitor_name,
-        region_id = as.integer(region_id),
-        genotype = input[[paste0("genotype_", i)]],
-        treatment = input[[paste0("treatment_", i)]],
-        temp = as.numeric(input[[paste0("temperature_", i)]]),
-        sex = input[[paste0("sex_", i)]],
-        start_datetime = start_datetime,
-        stop_datetime = stop_datetime
-      )
-    })
-  })
-      
+      metadata_list <- lapply(1:num_files, function(i) {
+        # Extract the monitor name from the file name
+        file_name <- files$name[i]
+        monitor_name <- paste0(substr(file_name, 1, 1), substr(file_name, 8, nchar(file_name) - 4))
+        
+        lapply(1:32, function(region_id) {
+          # Combine date and time inputs and format as POSIXct
+          start_date <- input[[paste0("start_date_", i)]]
+          start_time <- input[[paste0("start_time_", i)]]
+          stop_date <- input[[paste0("stop_date_", i)]]
+          stop_time <- input[[paste0("stop_time_", i)]]
+          
+          start_datetime <- ifelse(
+            is.na(start_time) || start_time == "",
+            as.character(start_date),
+            format(as.POSIXct(paste(start_date, start_time), format="%Y-%m-%d %H:%M:%S"), "%Y-%m-%d %H:%M:%S")
+          )
+          
+          stop_datetime <- ifelse(
+            is.na(stop_time) || stop_time == "",
+            as.character(stop_date),
+            format(as.POSIXct(paste(stop_date, stop_time), format="%Y-%m-%d %H:%M:%S"), "%Y-%m-%d %H:%M:%S")
+          )
+          
+          list(
+            file = files$name[i],
+            monitor = monitor_name,
+            region_id = as.integer(region_id),
+            genotype = input[[paste0("genotype_", i)]],
+            treatment = input[[paste0("treatment_", i)]],
+            temp = as.numeric(input[[paste0("temperature_", i)]]),
+            sex = input[[paste0("sex_", i)]],
+            start_datetime = start_datetime,
+            stop_datetime = stop_datetime
+          )
+        })
+      })
+          
       metadata_list <- do.call(rbind, lapply(metadata_list, function(x) do.call(rbind, x)))
       metadata_df <- as.data.frame(metadata_list)
       
-      # Create a directory to save files if it does not exist
-      if (!dir.exists("uploaded_files")) {
-        dir.create("uploaded_files")
-      }
-      
-      # Save the uploaded files to the server
-      for (i in 1:num_files) {
-        file_path <- file.path("uploaded_files", files$name[i])
-        file.copy(files$datapath[i], file_path)
-      }
-      
-      uploaded_files(metadata_df)
+      uploaded_files(list(metadata = metadata_df, file_paths = file_paths))
       
       # Display a confirmation message
       showModal(modalDialog(
@@ -177,44 +167,91 @@ server <- function(input, output, session) {
       uploaded_files(df)
     })
 
-    observeEvent(input$file2, {
-      req(input$file2)
-      metadata <- read.csv(input$file2$datapath)
 
-      metadata_proc <- link_dam_metadata(metadata, result_dir = "./uploaded_files")
-      output$meta_contents <- DT::renderDataTable(metadata, filter = list(position = "top", clear = FALSE, plain = TRUE))
-    })
+############## process data tab
 
-    observeEvent(input$plots, {
-      req(uploaded_files(), metadata_proc)
+    observeEvent(input$save_process, {
+      req(input$monitor_files)
+      req(input$meta_file)
+      req(input$batch_title)
 
-      #load data
-      dt <- load_dam(metadata_proc)
+      metadata <- read.csv(input$meta_file$datapath)
+      batch_title <- input$batch_title
 
-      for(i in unique(metadata_proc$monitor))
-      {
-        pdf_file <- paste0(ExperimentData@Batch,'_activity_by_monitor',i,'.pdf')
-        pdf(pdf_file)
-        
-        # Create plot
-        activity_by_monitor <-ggetho(dt[xmv(monitor) == i ], aes(z=activity)) +
-          stat_bar_tile_etho() +
-          scale_x_days()
-        # Print plot to PDF
-        print(activity_by_monitor)
-        dev.off() # Close the PDF device
-        print(paste0(pdf_file, ' written'))
+      files <- input$monitor_files
+      num_files <- nrow(files)
+
+      # Create a directory to save files if it does not exist
+      if (!dir.exists("uploaded_files")) {
+        dir.create("uploaded_files")
       }
 
-      
+      # Save the uploaded files to the server
+      file_paths <- character(num_files)
+      for (i in 1:num_files) {
+        file_path <- file.path("uploaded_files", files$name[i])
+        file.copy(files$datapath[i], file_path)
+        file_paths[i] <- file_path
+      }
 
       showModal(modalDialog(
-        title = "Preprocessing Complete", 
-        "Data processing has been successfully completed.",
+        title = "Saved data",
         easyClose = TRUE,
         footer = NULL
       ))
     })
 
+    ##############
+    req(input$save_process)
+    req(input$meta_file)
+    req(input$batch_title)
+    req(input$monitor_files)
+
+
+    metadata_proc <- link_dam_metadata(metadata, result_dir = "uploaded_files")
+    output$meta_contents <- DT::renderDataTable(metadata_proc, filter = list(position = "top", clear = FALSE, plain = TRUE))
+
+    observeEvent(input$plots, {
+      output$plots_output <- renderUI({
+        req(input$meta_file, input$monitor_file, input$batch_title)
+        metadata <- metadata_proc()
+        monitors <- unique(metadata$monitor)
+        
+        plot_output_list <- lapply(monitors, function(monitor) {
+          plotname <- paste0("plot_", monitor)
+          plotOutput(plotname, height = 600, width = 800)
+        })
+        
+        do.call(tagList, plot_output_list)
+      })
+      
+      lapply(unique(metadata_proc()$monitor), function(monitor) {
+        output[[paste0("plot_", monitor)]] <- renderPlot({
+          dt <- load_dam(metadata_proc())
+          
+          ggetho(dt[xmv(monitor) == monitor], aes(z = activity)) +
+            stat_bar_tile_etho() +
+            scale_x_days()
+        })
+      })
+    })
+
+    output$download_all_plots <- downloadHandler(
+      filename = function() {
+        paste0(batch_title(), "_all_plots.pdf")
+      },
+      content = function(file) {
+        pdf(file)
+        dt <- load_dam(metadata_proc())
+        unique_monitors <- unique(metadata_proc()$monitor)
+        lapply(unique_monitors, function(i) {
+          activity_by_monitor <- ggetho(dt[xmv(monitor) == i], aes(z = activity)) +
+            stat_bar_tile_etho() +
+            scale_x_days()
+          print(activity_by_monitor)
+        })
+        dev.off()
+      }
+    )
   })
 }

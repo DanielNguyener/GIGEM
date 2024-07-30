@@ -31,12 +31,18 @@ ui <- fluidPage(
     tabPanel(
       title = "Process Data",
       sidebarPanel(
-        fileInput("file2", "Upload metadata.csv", multiple = FALSE, accept = (c(".csv"))),
-        actionButton("plots", "Generate Plots")
+        fileInput("monitor_files", "Upload monitor.txt files", multiple = TRUE, accept = c(".txt")),
+        fileInput("meta_file", "Upload metadata.csv", multiple = FALSE, accept = (c(".csv"))),
+        textInput("batch_title", "Batch Title"),
+        
+        actionButton("save_process", "Save"),
+
+        actionButton("plots", "Generate Plots"),
+        downloadButton("download_all_plots", "Download All Plots as PDF")
       ),
 
       mainPanel(
-        DTOutput("meta_contents")
+        uiOutput("plots_output")
       )
     )
   )
