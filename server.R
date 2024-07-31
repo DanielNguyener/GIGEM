@@ -12,12 +12,13 @@ options(shiny.maxRequestSize=30*1024^2)
 
 server <- function(input, output, session) {
   # Reactive value to store uploaded file names and metadata
+  # Reactive value to store uploaded file names and metadata
   uploaded_files <- reactiveVal(NULL)
   metadata_proc <- reactiveVal(data.frame())
   batch_title <- reactiveVal()
+  
 
   observe({
-  
     observeEvent(input$file1, {
       req(input$file1)
       files <- input$file1
@@ -98,10 +99,24 @@ server <- function(input, output, session) {
           )
         })
       })
-          
+
+      # Combine lists into a single data frame
       metadata_list <- do.call(rbind, lapply(metadata_list, function(x) do.call(rbind, x)))
-      metadata_df <- as.data.frame(metadata_list)
+      metadata_df <- as.data.frame(metadata_list, stringsAsFactors = FALSE)
       
+      # Create a directory to save files if it does not exist
+      if (!dir.exists("uploaded_files")) {
+        dir.create("uploaded_files")
+      }
+
+      # Save the uploaded files to the server
+      file_paths <- character(num_files)
+      for (i in 1:num_files) {
+        file_path <- file.path("uploaded_files", files$name[i])
+        file.copy(files$datapath[i], file_path)
+        file_paths[i] <- file_path
+      }
+
       uploaded_files(list(metadata = metadata_df, file_paths = file_paths))
       
       # Display a confirmation message
@@ -116,7 +131,7 @@ server <- function(input, output, session) {
     # Display the metadata table with formatting
     output$saved_files <- renderTable({
       req(uploaded_files())
-      df <- uploaded_files()
+      df <- uploaded_files()$metadata
       df$region_id <- as.integer(df$region_id)
       df$temp <- paste0(as.integer(df$temp), "°C")
       df
@@ -125,7 +140,7 @@ server <- function(input, output, session) {
     # Save the metadata table as CSV
     observeEvent(input$save_csv, {
       req(uploaded_files())
-      df <- uploaded_files()
+      df <- uploaded_files()$metadata
       # Convert all columns to character
       df[] <- lapply(df, as.character)
       write.csv(df, file = "generated_files/metadata.csv", row.names = FALSE)
@@ -137,38 +152,35 @@ server <- function(input, output, session) {
       ))
     })
 
-    # Render table for selection of rows to omit
-    output$omit_rows <- renderUI({
-      req(uploaded_files())
-      df <- uploaded_files()
-      tagList(
-        checkboxGroupInput("rows_to_omit", "Select Monitor & Region_ID combinations to omit:",
-                          choices = paste(df$monitor, df$region_id, sep = "_")),
-        actionButton("omit", "Omit Selected Rows")
-      )
-    })
-    
+
     # Render inputs for entering Monitor and Region_ID to omit
     output$omit_rows <- renderUI({
+      req(uploaded_files())
+      df <- uploaded_files()$metadata
       tagList(
         textInput("monitor_to_omit", "Monitor to Omit:"),
         numericInput("region_id_to_omit", "Region ID to Omit:", value = 1, min = 1, step = 1),
         actionButton("omit", "Omit Selected Row")
       )
     })
+
     
     # Handle omitting rows
     observeEvent(input$omit, {
       req(uploaded_files())
-      df <- uploaded_files()
+      df <- uploaded_files()$metadata
       monitor <- input$monitor_to_omit
       region_id <- as.integer(input$region_id_to_omit)
-      df <- df[!(df$monitor == monitor & df$region_id == region_id),]
-      uploaded_files(df)
+      
+      if (!is.na(monitor) && !is.na(region_id)) {
+        df <- df[!(df$monitor == monitor & df$region_id == region_id), ]
+        uploaded_files(list(metadata = df, file_paths = uploaded_files()$file_paths))
+      }
     })
 
 
-############## process data tab
+
+    ############## process data tab
 
     observeEvent(input$save_process, {
       req(input$monitor_files)
@@ -181,76 +193,83 @@ server <- function(input, output, session) {
       files <- input$monitor_files
       num_files <- nrow(files)
 
-      # Create a directory to save files if it does not exist
-      if (!dir.exists("uploaded_files")) {
-        dir.create("uploaded_files")
-      }
+      # # Create a directory to save files if it does not exist
+      # if (!dir.exists("uploaded_files")) {
+      #   dir.create("uploaded_files")
+      # }
 
-      # Save the uploaded files to the server
-      file_paths <- character(num_files)
-      for (i in 1:num_files) {
-        file_path <- file.path("uploaded_files", files$name[i])
-        file.copy(files$datapath[i], file_path)
-        file_paths[i] <- file_path
-      }
+      # # Save the uploaded files to the server
+      # file_paths <- character(num_files)
+      # for (i in 1:num_files) {
+      #   file_path <- file.path("uploaded_files", files$name[i])
+      #   file.copy(files$datapath[i], file_path)
+      #   file_paths[i] <- file_path
+      # }
 
       showModal(modalDialog(
         title = "Saved data",
         easyClose = TRUE,
         footer = NULL
       ))
+
+      metadata_proc(link_dam_metadata(metadata, result_dir = "uploaded_files"))
+      output$meta_contents <- DT::renderDataTable(metadata, filter = list(position = "top", clear = FALSE, plain = TRUE))
     })
-
-    ##############
-    req(input$save_process)
-    req(input$meta_file)
-    req(input$batch_title)
-    req(input$monitor_files)
-
-
-    metadata_proc <- link_dam_metadata(metadata, result_dir = "uploaded_files")
-    output$meta_contents <- DT::renderDataTable(metadata_proc, filter = list(position = "top", clear = FALSE, plain = TRUE))
+      
+    # Update select inputs for monitors
+    observe({
+      req(metadata_proc())
+      monitors <- unique(metadata_proc()$monitor)
+      updateSelectInput(session, "monitor1_select", choices = monitors)
+      updateSelectInput(session, "monitor2_select", choices = monitors)
+    
 
     observeEvent(input$plots, {
       output$plots_output <- renderUI({
-        req(input$meta_file, input$monitor_file, input$batch_title)
-        metadata <- metadata_proc()
-        monitors <- unique(metadata$monitor)
-        
-        plot_output_list <- lapply(monitors, function(monitor) {
-          plotname <- paste0("plot_", monitor)
-          plotOutput(plotname, height = 600, width = 800)
-        })
-        
-        do.call(tagList, plot_output_list)
+        tagList(
+          plotOutput("plot_monitor1", height = 600, width = 800),
+          plotOutput("plot_monitor2", height = 600, width = 800)
+        )
       })
       
-      lapply(unique(metadata_proc()$monitor), function(monitor) {
-        output[[paste0("plot_", monitor)]] <- renderPlot({
-          dt <- load_dam(metadata_proc())
-          
-          ggetho(dt[xmv(monitor) == monitor], aes(z = activity)) +
-            stat_bar_tile_etho() +
-            scale_x_days()
-        })
+      output$plot_monitor1 <- renderPlot({
+        req(input$monitor1_select)
+        dt <- load_dam(metadata_proc())
+        ggetho(dt[xmv(monitor) == input$monitor1_select], aes(z = activity)) +
+          stat_bar_tile_etho() +
+          scale_x_days()
       })
+      
+      output$plot_monitor2 <- renderPlot({
+        req(input$monitor2_select)
+        dt <- load_dam(metadata_proc())
+        ggetho(dt[xmv(monitor) == input$monitor2_select], aes(z = activity)) +
+          stat_bar_tile_etho() +
+          scale_x_days()
+      })
+    })
     })
 
     output$download_all_plots <- downloadHandler(
       filename = function() {
-        paste0(batch_title(), "_all_plots.pdf")
+        paste("activity_", Sys.Date(), ".zip")
       },
       content = function(file) {
-        pdf(file)
+        # ensure directory exists,
+        dir.create("generated_files", showWarnings = FALSE)
+
+        # get unique monitors
+        monitors <- unique(metadata_proc()$monitor)
         dt <- load_dam(metadata_proc())
-        unique_monitors <- unique(metadata_proc()$monitor)
-        lapply(unique_monitors, function(i) {
-          activity_by_monitor <- ggetho(dt[xmv(monitor) == i], aes(z = activity)) +
+
+        for (monitor in monitors) {
+          p <- ggetho(dt[xmv(monitor) == monitor], aes(z = activity)) +
             stat_bar_tile_etho() +
             scale_x_days()
-          print(activity_by_monitor)
-        })
-        dev.off()
+          ggsave(filename = file.path("generated_files", paste0(batch_title, "_activity_by_", monitor, ".png")), plot = p)
+        }
+
+        zip(file, files = list.files("generated_files", full.names = TRUE))
       }
     )
   })

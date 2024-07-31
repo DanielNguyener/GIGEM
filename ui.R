@@ -36,13 +36,20 @@ ui <- fluidPage(
         textInput("batch_title", "Batch Title"),
         
         actionButton("save_process", "Save"),
-
-        actionButton("plots", "Generate Plots"),
-        downloadButton("download_all_plots", "Download All Plots as PDF")
       ),
 
       mainPanel(
-        uiOutput("plots_output")
+        tabsetPanel(
+          tabPanel("Processed Data", DT::dataTableOutput("meta_contents")),
+          tabPanel("Activity Plot Selection",
+            selectInput("monitor1_select", "Select Monitor 1", choices = NULL),
+            selectInput("monitor2_select", "Select Monitor 2", choices = NULL),
+            actionButton("plot_button", "View Activity Plots"),
+            uiOutput("plots_output"),
+            downloadButton("download_all_plots", "Download All Plots as PNG"),
+ 
+          ),
+        )
       )
     )
   )
