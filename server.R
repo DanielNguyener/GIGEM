@@ -11,14 +11,15 @@ library(DT)
 options(shiny.maxRequestSize=30*1024^2)
 
 server <- function(input, output, session) {
-  # Reactive value to store uploaded file names and metadata
-  # Reactive value to store uploaded file names and metadata
+
+
   uploaded_files <- reactiveVal(NULL)
   metadata_proc <- reactiveVal(data.frame())
   batch_title <- reactiveVal()
   
-
   observe({
+
+
     observeEvent(input$file1, {
       req(input$file1)
       files <- input$file1
@@ -178,99 +179,75 @@ server <- function(input, output, session) {
       }
     })
 
+  })
 
 
-    ############## process data tab
+
+  ############## process data tab
+  
+  observe({
+
+    req(input$meta_file)
+    metadata <- read.csv(input$meta_file$datapath)
+    metadata <- na.omit(metadata)
+
+    updateSelectInput(session, "plot_choice", choices = unique(metadata$monitor))
+
+    fixUploadedFilesNames <- function(x) {
+      if (is.null(x)) {
+        return()
+      }
+
+      oldNames <- x$datapath
+      newNames <- file.path(
+        dirname(x$datapath),
+        x$name
+      )
+      file.rename(from = oldNames, to = newNames)
+      x$datapath <- newNames
+      x
+    }
+
+    file.copy(fixUploadedFilesNames(input$monitor_files)$datapath, ".", recursive = TRUE, overwrite = TRUE)
+    metadata_proc <- link_dam_metadata(metadata, result_dir = ".")
+    output$contents <- DT::renderDataTable(
+      metadata,
+      filter = list(position = "top", clear = FALSE, plain = TRUE)
+    )
 
     observeEvent(input$save_process, {
-      req(input$monitor_files)
-      req(input$meta_file)
-      req(input$batch_title)
 
-      metadata <- read.csv(input$meta_file$datapath)
-      batch_title <- input$batch_title
+      dt_sleep <- load_dam(metadata_proc, FUN = sleepr::sleep_dam_annotation)
+      dt_act <- load_dam(metadata_proc)
 
-      files <- input$monitor_files
-      num_files <- nrow(files)
+      observeEvent(input$plot_button, {
+        output$plots_output <- renderPlot({
+          req(input$meta_file, input$plot_choice, input$plot_type)
 
-      # # Create a directory to save files if it does not exist
-      # if (!dir.exists("uploaded_files")) {
-      #   dir.create("uploaded_files")
-      # }
+          selected_monitor <- input$plot_choice
+          plot_type <- input$plot_type
+          plot_data <- metadata[metadata$monitor == selected_monitor, ]
 
-      # # Save the uploaded files to the server
-      # file_paths <- character(num_files)
-      # for (i in 1:num_files) {
-      #   file_path <- file.path("uploaded_files", files$name[i])
-      #   file.copy(files$datapath[i], file_path)
-      #   file_paths[i] <- file_path
-      # }
+          if (plot_type == "Activity Plot") {
 
-      showModal(modalDialog(
-        title = "Saved data",
-        easyClose = TRUE,
-        footer = NULL
-      ))
+            act_etho <- ggetho(dt_act[xmv(monitor) == selected_monitor], aes(z = activity)) +
+              stat_bar_tile_etho() +
+              scale_x_days()
+            print(act_etho)
+          }
 
-      metadata_proc(link_dam_metadata(metadata, result_dir = "uploaded_files"))
-      output$meta_contents <- DT::renderDataTable(metadata, filter = list(position = "top", clear = FALSE, plain = TRUE))
-    })
-      
-    # Update select inputs for monitors
-    observe({
-      req(metadata_proc())
-      monitors <- unique(metadata_proc()$monitor)
-      updateSelectInput(session, "monitor1_select", choices = monitors)
-      updateSelectInput(session, "monitor2_select", choices = monitors)
-    
+          if (plot_type == "Sleep Plot") {
 
-    observeEvent(input$plots, {
-      output$plots_output <- renderUI({
-        tagList(
-          plotOutput("plot_monitor1", height = 600, width = 800),
-          plotOutput("plot_monitor2", height = 600, width = 800)
-        )
-      })
-      
-      output$plot_monitor1 <- renderPlot({
-        req(input$monitor1_select)
-        dt <- load_dam(metadata_proc())
-        ggetho(dt[xmv(monitor) == input$monitor1_select], aes(z = activity)) +
-          stat_bar_tile_etho() +
-          scale_x_days()
-      })
-      
-      output$plot_monitor2 <- renderPlot({
-        req(input$monitor2_select)
-        dt <- load_dam(metadata_proc())
-        ggetho(dt[xmv(monitor) == input$monitor2_select], aes(z = activity)) +
-          stat_bar_tile_etho() +
-          scale_x_days()
+            sleep_etho <- ggetho(dt_sleep[xmv(monitor) == selected_monitor], aes(z = asleep)) +
+              stat_bar_tile_etho() +
+              scale_x_days()
+            print(sleep_etho)
+          }
+
+        })
       })
     })
-    })
-
-    output$download_all_plots <- downloadHandler(
-      filename = function() {
-        paste("activity_", Sys.Date(), ".zip")
-      },
-      content = function(file) {
-        # ensure directory exists,
-        dir.create("generated_files", showWarnings = FALSE)
-
-        # get unique monitors
-        monitors <- unique(metadata_proc()$monitor)
-        dt <- load_dam(metadata_proc())
-
-        for (monitor in monitors) {
-          p <- ggetho(dt[xmv(monitor) == monitor], aes(z = activity)) +
-            stat_bar_tile_etho() +
-            scale_x_days()
-          ggsave(filename = file.path("generated_files", paste0(batch_title, "_activity_by_", monitor, ".png")), plot = p)
-        }
-
-        zip(file, files = list.files("generated_files", full.names = TRUE))
-      }
-    )
   })
+
+
 }

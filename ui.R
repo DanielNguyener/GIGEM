@@ -40,18 +40,15 @@ ui <- fluidPage(
 
       mainPanel(
         tabsetPanel(
-          tabPanel("Processed Data", DT::dataTableOutput("meta_contents")),
-          tabPanel("Activity Plot Selection",
-            selectInput("monitor1_select", "Select Monitor 1", choices = NULL),
-            selectInput("monitor2_select", "Select Monitor 2", choices = NULL),
+          tabPanel("Metadata", DT::dataTableOutput("contents")),
+          tabPanel("Activity Plots",
+            selectInput("plot_choice", "Choose Monitor", choices = NULL),
+            selectInput("plot_type", "Choose Plot Type", choices = c("Activity Plot", "Sleep Plot")),
             actionButton("plot_button", "View Activity Plots"),
-            uiOutput("plots_output"),
-            downloadButton("download_all_plots", "Download All Plots as PNG"),
- 
+            plotOutput("plots_output"),
           ),
         )
       )
     )
   )
-  
 )
