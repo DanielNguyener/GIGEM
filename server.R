@@ -6,12 +6,12 @@ library(data.table)
 library(damr)
 library(ggetho)
 library(DT)
+source("helpers.R")
 
 # Increase upload size
 options(shiny.maxRequestSize=30*1024^2)
 
 server <- function(input, output, session) {
-
 
   uploaded_files <- reactiveVal(NULL)
   metadata_proc <- reactiveVal(data.frame())
@@ -216,9 +216,28 @@ server <- function(input, output, session) {
     )
 
     observeEvent(input$save_process, {
+      withBusyIndicatorServer("save_process", {
+        # calculating.
+        
+        req(input$batch_title)
+        batch_title <- input$batch_title
 
-      dt_sleep <- load_dam(metadata_proc, FUN = sleepr::sleep_dam_annotation)
-      dt_act <- load_dam(metadata_proc)
+        dt_sleep <- load_dam(metadata_proc, FUN = sleepr::sleep_dam_annotation)
+        dt_act <- load_dam(metadata_proc)
+
+        dt_curated_1 <- curate_dead_animals(dt_sleep)
+        removed_ids <- setdiff(dt[, id, meta = TRUE], dt_curated_1[, id, meta = TRUE])
+
+        curated_1_list <- data.table(removed_ids)
+        write.csv(curated_1_list, paste0("generated_files/removed_list1_", batch_title, ".csv"))
+      })
+
+      output$status <- renderText({
+        req(input$save_process)
+        "Pre-Processing Complete!"
+      })
+      
+      #################
 
       observeEvent(input$plot_button, {
         output$plots_output <- renderPlot({
@@ -246,6 +265,8 @@ server <- function(input, output, session) {
 
         })
       })
+
+
     })
   })
 

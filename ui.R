@@ -3,8 +3,10 @@
 # User Interface
 library(shiny)
 library(DT)
+source("helpers.R")
 
 ui <- fluidPage(
+  use_busy_spinner(),
   navbarPage(
     title = "Prototype",
     position = c("static-top"),
@@ -34,8 +36,12 @@ ui <- fluidPage(
         fileInput("monitor_files", "Upload monitor.txt files", multiple = TRUE, accept = c(".txt")),
         fileInput("meta_file", "Upload metadata.csv", multiple = FALSE, accept = (c(".csv"))),
         textInput("batch_title", "Batch Title"),
+      
+        withBusyIndicatorUI(actionButton("save_process", "Save")),
+        withBusyIndicatorUI(textOutput("status"))
         
-        actionButton("save_process", "Save"),
+        
+        
       ),
 
       mainPanel(
