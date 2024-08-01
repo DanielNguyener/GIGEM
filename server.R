@@ -217,7 +217,6 @@ server <- function(input, output, session) {
 
     observeEvent(input$save_process, {
       withBusyIndicatorServer("save_process", {
-        # calculating.
         
         req(input$batch_title)
         batch_title <- input$batch_title
@@ -230,6 +229,8 @@ server <- function(input, output, session) {
 
         curated_1_list <- data.table(removed_ids)
         write.csv(curated_1_list, paste0("generated_files/removed_list1_", batch_title, ".csv"))
+
+        #TODO continue processing...
       })
 
       output$status <- renderText({
