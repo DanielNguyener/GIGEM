@@ -35,7 +35,9 @@ ui <- fluidPage(
         fileInput("monitor_files", "Upload monitor.txt files", multiple = TRUE, accept = c(".txt")),
         fileInput("meta_file", "Upload metadata.csv", multiple = FALSE, accept = (c(".csv"))),
         textInput("batch_title", "Batch Title"),
-      
+        numericInput("num_days", "Num Days:", value = 1, min = 1, max = 100, step = 1),
+
+        p("Please wait until this process finishes before displaying or downloading any plots."),
         withBusyIndicatorUI(actionButton("save_process", "Save")),
         withBusyIndicatorUI(textOutput("status"))
         
@@ -47,19 +49,49 @@ ui <- fluidPage(
         tabsetPanel(
           tabPanel("Metadata", DT::dataTableOutput("contents")),
           tabPanel("Activity Plots",
+            p("select which monitor, and plot type to display."),
             selectInput("plot_choice", "Choose Monitor", choices = NULL),
             selectInput("plot_type", "Choose Plot Type", choices = c("Activity Plot", "Sleep Plot")),
             actionButton("plot_button", "View Activity Plots"),
             plotOutput("plots_output"),
           ),
           tabPanel("Deadcheck Plots",
+            p("before you can download, you must click show plots."),
             actionButton("deadcheck_display", "Show Deadcheck Plots"),
-            actionButton("download_deadcheck", "Download Deadcheck PDFs"),
+            actionButton("download_deadcheck", "Download PDFs"),
             h4("Before Deadcheck"),
             plotOutput("before_dead"),
             h4("After Deadcheck"),
             plotOutput("after_dead"),
-            
+          ),
+          tabPanel("SleepPop Plots",
+            p("before you can download, you must click show plots."),
+            actionButton("sleep_pop_display", "Show Sleep Population Plots"),
+            actionButton("download_sleeppop", "Download PDFs"),
+            plotOutput("sleep_pop"),
+            plotOutput("sleep_pop_wrap"),
+          ),
+
+          tabPanel("Create Summary",
+            p("1. Create desired ZT bins."),
+            checkboxGroupInput(
+              inputId = "zt_bins",
+              label = "Select ZT Bins:",
+              choices = c(
+                "ZT 0-4" = "ZT_0_4",
+                "ZT 4-8" = "ZT_4_8",
+                "ZT 8-12" = "ZT_8_12",
+                "ZT 12-16" = "ZT_12_16",
+                "ZT 16-20" = "ZT_16_20",
+                "ZT 20-24" = "ZT_20_24"
+              ),
+            ),
+            p("2. sleep fraction & time for: all, light, dark and all additional bins desired."),
+            p("3. latency & bout values for each day."),
+            actionButton("cal_sum", "Calculate Summary!"),
+            actionButton("download_sleeppopbout", "Download PDF"),
+            actionButton("download_sum", "Download Summary CSV"),
+            plotOutput("sleep_bout_wrap")
           )
         )
       )

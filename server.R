@@ -17,6 +17,7 @@ server <- function(input, output, session) {
   uploaded_files <- reactiveVal(NULL)
   metadata_proc <- reactiveVal(data.frame())
   batch_title <- reactiveVal()
+
   
   observe({
 
@@ -186,16 +187,105 @@ server <- function(input, output, session) {
 
   ############## process data tab
 
+  # pre-defined FUNCTIONS
   create_sleep_plot <- function(data) {
-    # pdf(filename)
+
     sleep_plot <- ggetho(data, aes(z = asleep)) +
       stat_ld_annotations(ypos = "top") +
       stat_tile_etho()
-    # print(sleep_plot)
-    # dev.off()
-    # message(message_text)
+
     return(sleep_plot)
   }
+
+  create_population_plot <- function(plot_data, wrap_time = NULL) {
+
+    pop_sleep_plot <- ggetho(plot_data, aes(y = asleep, colour = treatment), time_wrap = wrap_time) +
+      stat_pop_etho() +
+      stat_ld_annotations() +
+      facet_grid(genotype ~ .) +
+      scale_y_continuous(name = "Fraction of time sleeping", labels = scales::percent)
+    
+    return(pop_sleep_plot)
+  }
+
+  ZTbins <- function(dt, summary_dt_final, selected_bins) {
+    
+    # Convert selected bins to start hours
+    bin_hours <- as.numeric(gsub("ZT_(\\d+)_\\d+", "\\1", selected_bins))
+    
+    # Initialize list to store summary data
+    summaries <- list()
+    
+    # Process each selected bin
+    for (start_hour in bin_hours) {
+      end_hour <- start_hour + 4
+      start_time <- sprintf("%04d", start_hour * 3600)  # Start time in seconds
+      end_time <- sprintf("%04d", end_hour * 3600)    # End time in seconds
+      
+      # Create bin-specific data
+      dt_sleep <- dt[t %between% c(start_time, end_time)]
+      
+      # Create new columns for sleep fraction and sleep time
+      summary_dt_sleep <- dt_sleep[, .(
+        sleep_fraction = mean(asleep),
+        sleep_time = 240 * mean(asleep)
+      ), by = id]
+      
+      # Print the number of columns before renaming
+      # cat("Column count before renaming:", ncol(summary_dt_sleep), "\n")
+      
+      # Prepare new column names
+      new_col_names <- c(
+        "id", 
+        paste0("sleep_fraction_ZT", start_hour, "_", end_hour),
+        paste0("sleep_time_ZT", start_hour, "_", end_hour)
+      )
+      
+      # # Check if the number of new column names matches the number of columns
+      # if (ncol(summary_dt_sleep) == length(new_col_names)) {
+      #   colnames(summary_dt_sleep) <- new_col_names
+      # } else {
+      #   cat("Mismatch in column names:\n")
+      #   cat("Expected names:", length(new_col_names), "\n")
+      #   cat("Actual names:", ncol(summary_dt_sleep), "\n")
+      #   stop("Column count mismatch. Please check the renaming logic.")
+      # }
+      
+      # Merge summaries
+      summary_dt_final <- merge(summary_dt_final, summary_dt_sleep, by = "id", all.x = TRUE)
+      
+      # Store the summary data in the list
+      summaries[[paste0("ZT_", start_hour, "_", end_hour)]] <- summary_dt_sleep
+    }
+    
+    return(summary_dt_final)
+  }
+
+  process_days <- function(num_days, bout_dt, summary_dt_final) {
+  for (day in 1:num_days) {
+    start_time <- days(day - 1)
+    end_time <- start_time + hours(12)
+    
+    # Extracting the bouts for the current day
+    bout_dt_current_day <- bout_dt[t %between% c(start_time, end_time)]
+    bout_dt_current_day[, t := t - start_time]
+    
+    # Summary for the current day
+    bout_summary <- bout_dt_current_day[, .(
+      latency = t[1],
+      first_bout_length = duration[1],
+      latency_to_longest_bout = t[which.max(duration)]
+    ), by = id]
+    
+    # Renaming columns for the current day
+    setnames(bout_summary, c("latency", "first_bout_length", "latency_to_longest_bout"), 
+             c(paste0("Day", day, "_latency"), paste0("Day", day, "_first_bout_length"), paste0("Day", day, "_latency_to_longest_bout")))
+    
+    # Merging with the final summary data table
+    summary_dt_final <- merge(summary_dt_final, bout_summary, by = "id")
+  }
+  return(summary_dt_final)
+}
   
   observe({
 
@@ -230,8 +320,10 @@ server <- function(input, output, session) {
     observeEvent(input$save_process, {
       withBusyIndicatorServer("save_process", {
         
-        req(input$batch_title)
+        req(input$batch_title, input$num_days)
+        message(paste("Calculating... Please Wait."))
         batch_title <- input$batch_title
+        num_days <- input$num_days
 
         dt_sleep <- load_dam(metadata_proc, FUN = sleepr::sleep_dam_annotation)
         dt_act <- load_dam(metadata_proc)
@@ -240,12 +332,29 @@ server <- function(input, output, session) {
         removed_ids <- setdiff(dt_sleep[, id, meta = TRUE], dt_curated_1[, id, meta = TRUE])
 
         curated_1_list <- data.table(removed_ids)
-        write.csv(curated_1_list, paste0("generated_files/removed_list1_", batch_title, ".csv"))  
+        write.csv(curated_1_list, paste0("generated_files/removed_list1_", batch_title, ".csv"))
+        message(paste("removed_list1_", batch_title, ".csv written"))
 
-        #TODO continue processing...
+        lifespan_dt <- dt_curated_1[, .(lifespan = max(t)), by=id]
+        valid_ids <- lifespan_dt[lifespan > days(num_days), id]
+
+        dt_curated_2 <- dt_curated_1[id %in% valid_ids]
+
+        removed_ids_2 <- setdiff(dt_curated_1[, id, meta = TRUE], dt_curated_2[, id, meta = TRUE])
+        curated_2_list <- data.table(removed_ids_2)
+        write.csv(curated_2_list, paste0("generated_files/removed_list2_", batch_title, ".csv"))
+        message(paste("removed_list2_", batch_title, ".csv written"))
+
+        dt_curated_final <- dt_curated_2[t %between% c(days(0), days(num_days))]
         
-      #   create_sleep_plot(dt_sleep, paste0("generated_files/", batch_title, "_sleep_before_deadcheck.pdf"), paste0(batch_title, "sleep_before_deadcheck.pdf written"))
-      #   create_sleep_plot(dt_curated_1, paste0("generated_files/", batch_title, "_sleep_after_deadcheck.pdf"), paste0(batch_title, "sleep_after_deadcheck.pdf written"))
+        dt <- behavr(dt_curated_final, metadata_proc)
+
+        summary_dt_final <- rejoin(dt[, .(sleep_fraction = mean(asleep)), by = id])
+        # day night phase calculation
+        dt[, phase := ifelse(t %% hours(24) < hours(12), "L", "D")]
+
+        # data summary: ERROR NEED TO FiX
+        
       })
 
       output$status <- renderText({
@@ -285,12 +394,15 @@ server <- function(input, output, session) {
       observeEvent(input$deadcheck_display, {
         req(input$deadcheck_display)
 
+        before <- create_sleep_plot(dt_sleep)
+        after <- create_sleep_plot(dt_curated_1)
+
         output$before_dead <- renderPlot({
-          create_sleep_plot(dt_sleep)
+          before
         })
 
         output$after_dead <- renderPlot({
-          create_sleep_plot(dt_curated_1)
+          after
         })
 
         # Handle PDF downloads
@@ -298,23 +410,147 @@ server <- function(input, output, session) {
           
           filename <- paste0("generated_files/", batch_title, "_sleep_before_deadcheck.pdf")
           pdf(filename)
-          print(create_sleep_plot(dt_sleep))
+          print(before)
           dev.off()
           
-        })
-
-        observeEvent(input$download_deadcheck, {
-
           filename <- paste0("generated_files/", batch_title, "_sleep_after_deadcheck.pdf")
           pdf(filename)
-          print(create_sleep_plot(dt_curated_1))
+          print(after)
           dev.off()
 
-        })
+          showModal(modalDialog(
+            title = "Download Complete",
+            paste0("downloaded as generated_files/", batch_title, "_sleep_before_deadcheck.pdf and
+            generated_files/", batch_title, "_sleep_after_deadcheck.pdf"),
+            easyClose = TRUE,
+            footer = NULL
+          ))
 
+        })
       })
 
+      observeEvent(input$sleep_pop_display, {
+        req(input$sleep_pop_display)
+
+        sleeppop <- create_population_plot(dt_curated_final)
+        sleeppop_wrap <- create_population_plot(dt_curated_final, wrap_time = hours(24))
+
+        output$sleep_pop <- renderPlot({
+          sleeppop
+        })
+
+        output$sleep_pop_wrap <- renderPlot({
+          sleeppop_wrap
+        })
+
+        observeEvent(input$download_sleeppop, {
+          filename <- paste0("generated_files/", batch_title, "_population_sleep.pdf")
+          pdf(filename)
+          print(sleeppop)
+          dev.off()
+
+          filename <- paste0("generated_files/", batch_title, "_population_sleep_wrap.pdf")
+          pdf(filename)
+          print(sleeppop_wrap)
+          dev.off()
+
+          showModal(modalDialog(
+            title = "Download Complete",
+            paste0("downloaded as generated_files/", batch_title, "_population_sleep.pdf and
+            generated_files/", batch_title, "_population_sleep_wrap.pdf"),
+            easyClose = TRUE,
+            footer = NULL
+          ))
+
+        })
+      })
+
+      observeEvent(input$cal_sum, {
+        
+        summary_dt_final <- rejoin(dt[, .(
+          sleep_fraction = mean(asleep),
+          sleep_fraction_all = mean(asleep),
+          sleep_time_all = 1440 * mean(asleep),
+          sleep_fraction_l = mean(asleep[phase == "L"]),
+          sleep_time_l = 720 * mean(asleep[phase == "L"]),
+          sleep_fraction_d = mean(asleep[phase == "D"]),
+          sleep_time_d = 720 * mean(asleep[phase == "D"])
+        ), by = id])
+
+        observeEvent(input$zt_bins, {
+          
+          message(paste("Creating bins..."))
+          summary_dt_final <- ZTbins(dt, summary_dt_final, input$zt_bins)
+
+          message(paste("Bout calculations..."))
+          bout_dt <- bout_analysis(asleep, dt)
+          bout_dt <- bout_dt[asleep == TRUE, -"asleep"]
+
+          message(paste("Creating plot..."))
+          sleep_bout_wrap <- ggetho(bout_dt, aes(y = duration / 60, colour = treatment), time_wrap = hours(24)) +
+            stat_pop_etho() +
+            facet_grid(genotype ~ .) +
+            scale_y_continuous(name = "Bout length (min)")
     
+
+          output$sleep_bout_wrap <- renderPlot({
+            sleep_bout_wrap
+          })
+
+          observeEvent(input$download_sleeppopbout, {
+            filename <- paste0("generated_files/", batch_title, "_population_sleep_bout_wrap.pdf")
+            showModal(modalDialog(
+              title = "Download Complete",
+              paste0("downloaded as generated_files/", batch_title, "_population_sleep_bout_wrap.pdf"),
+              easyClose = TRUE,
+              footer = NULL
+            ))
+          })
+
+          #TODO... #ERROR!!!!!!!!
+          message(paste("Processing Latency & Bout Lengths..."))
+
+
+          # DEFINE PROCESS_DAYS FUNCTION
+          summary_dt_final <- process_days(num_days, bout_dt, summary_dt_final)
+          message(paste("the function works"))
+
+          bout_dt_min <- bout_analysis(asleep, dt)[, .(
+            id, duration = duration / 60, t = t / 60,
+            phase = ifelse(t %% hours(24) < hours(12), "L", "D")
+          )][duration >= 5]
+          
+          bout_dt_min_L <- bout_dt_min[phase == "L"]
+          bout_dt_min_D <- bout_dt_min[phase == "D"]
+
+          summary_bout_L <- bout_dt_min_L[, .(
+            n_bouts_L = .N / num_days,
+            mean_bout_length_L = mean(duration)
+          ), by = id]
+          
+          summary_bout_D <- bout_dt_min_D[, .(
+            n_bouts_D = .N / num_days,
+            mean_bout_length_D = mean(duration)
+          ), by = id]
+          
+          # merge information
+          summary_dt_final <- merge(summary_dt_final, summary_bout_L[, .(id, n_bouts_L, mean_bout_length_L)], by = "id")
+          summary_dt_final <- merge(summary_dt_final, summary_bout_D[, .(id, n_bouts_D, mean_bout_length_D)], by = "id")
+          summary_dt_final <- summary_dt_final[, -2]
+
+          observeEvent(input$download_sum, {
+            write.csv(summary_dt_final, file = paste0("generated_files/summary_", batch_title, ".csv"), row.names = FALSE)
+
+            showModal(modalDialog(
+              title = "Download Complete",
+              paste0("downloaded as generated_files/summary_", batch_title, ".csv"),
+              easyClose = TRUE,
+              footer = NULL
+            ))
+          })
+        })
+      })
+      
 
     })
   })
