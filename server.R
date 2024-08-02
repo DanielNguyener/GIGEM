@@ -6,6 +6,7 @@ library(data.table)
 library(damr)
 library(ggetho)
 library(DT)
+library(sleepr)
 source("helpers.R")
 
 # Increase upload size
@@ -184,6 +185,17 @@ server <- function(input, output, session) {
 
 
   ############## process data tab
+
+  create_sleep_plot <- function(data) {
+    # pdf(filename)
+    sleep_plot <- ggetho(data, aes(z = asleep)) +
+      stat_ld_annotations(ypos = "top") +
+      stat_tile_etho()
+    # print(sleep_plot)
+    # dev.off()
+    # message(message_text)
+    return(sleep_plot)
+  }
   
   observe({
 
@@ -225,12 +237,15 @@ server <- function(input, output, session) {
         dt_act <- load_dam(metadata_proc)
 
         dt_curated_1 <- curate_dead_animals(dt_sleep)
-        removed_ids <- setdiff(dt[, id, meta = TRUE], dt_curated_1[, id, meta = TRUE])
+        removed_ids <- setdiff(dt_sleep[, id, meta = TRUE], dt_curated_1[, id, meta = TRUE])
 
         curated_1_list <- data.table(removed_ids)
-        write.csv(curated_1_list, paste0("generated_files/removed_list1_", batch_title, ".csv"))
+        write.csv(curated_1_list, paste0("generated_files/removed_list1_", batch_title, ".csv"))  
 
         #TODO continue processing...
+        
+      #   create_sleep_plot(dt_sleep, paste0("generated_files/", batch_title, "_sleep_before_deadcheck.pdf"), paste0(batch_title, "sleep_before_deadcheck.pdf written"))
+      #   create_sleep_plot(dt_curated_1, paste0("generated_files/", batch_title, "_sleep_after_deadcheck.pdf"), paste0(batch_title, "sleep_after_deadcheck.pdf written"))
       })
 
       output$status <- renderText({
@@ -267,6 +282,39 @@ server <- function(input, output, session) {
         })
       })
 
+      observeEvent(input$deadcheck_display, {
+        req(input$deadcheck_display)
+
+        output$before_dead <- renderPlot({
+          create_sleep_plot(dt_sleep)
+        })
+
+        output$after_dead <- renderPlot({
+          create_sleep_plot(dt_curated_1)
+        })
+
+        # Handle PDF downloads
+        observeEvent(input$download_deadcheck, {
+          
+          filename <- paste0("generated_files/", batch_title, "_sleep_before_deadcheck.pdf")
+          pdf(filename)
+          print(create_sleep_plot(dt_sleep))
+          dev.off()
+          
+        })
+
+        observeEvent(input$download_deadcheck, {
+
+          filename <- paste0("generated_files/", batch_title, "_sleep_after_deadcheck.pdf")
+          pdf(filename)
+          print(create_sleep_plot(dt_curated_1))
+          dev.off()
+
+        })
+
+      })
+
+    
 
     })
   })

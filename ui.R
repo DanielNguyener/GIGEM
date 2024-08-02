@@ -6,7 +6,6 @@ library(DT)
 source("helpers.R")
 
 ui <- fluidPage(
-  use_busy_spinner(),
   navbarPage(
     title = "Prototype",
     position = c("static-top"),
@@ -53,6 +52,15 @@ ui <- fluidPage(
             actionButton("plot_button", "View Activity Plots"),
             plotOutput("plots_output"),
           ),
+          tabPanel("Deadcheck Plots",
+            actionButton("deadcheck_display", "Show Deadcheck Plots"),
+            actionButton("download_deadcheck", "Download Deadcheck PDFs"),
+            h4("Before Deadcheck"),
+            plotOutput("before_dead"),
+            h4("After Deadcheck"),
+            plotOutput("after_dead"),
+            
+          )
         )
       )
     )
