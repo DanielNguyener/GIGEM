@@ -231,9 +231,6 @@ server <- function(input, output, session) {
         sleep_time = 240 * mean(asleep)
       ), by = id]
       
-      # Print the number of columns before renaming
-      # cat("Column count before renaming:", ncol(summary_dt_sleep), "\n")
-      
       # Prepare new column names
       new_col_names <- c(
         "id", 
@@ -241,15 +238,23 @@ server <- function(input, output, session) {
         paste0("sleep_time_ZT", start_hour, "_", end_hour)
       )
       
-      # # Check if the number of new column names matches the number of columns
-      # if (ncol(summary_dt_sleep) == length(new_col_names)) {
-      #   colnames(summary_dt_sleep) <- new_col_names
-      # } else {
-      #   cat("Mismatch in column names:\n")
-      #   cat("Expected names:", length(new_col_names), "\n")
-      #   cat("Actual names:", ncol(summary_dt_sleep), "\n")
-      #   stop("Column count mismatch. Please check the renaming logic.")
-      # }
+      # Ensure the number of new column names matches the number of columns
+      if (ncol(summary_dt_sleep) == length(new_col_names)) {
+        setnames(summary_dt_sleep, old = names(summary_dt_sleep), new = new_col_names)
+      } else {
+        message("Mismatch in column names:\n")
+        message("Expected names:", length(new_col_names), "\n")
+        message("Actual names:", ncol(summary_dt_sleep), "\n")
+        stop("Column count mismatch. Please check the renaming logic.")
+      }
+      
+      # Rename columns in summary_dt_final to prevent conflicts
+      final_col_names <- names(summary_dt_final)
+      conflict_cols <- intersect(new_col_names[-1], final_col_names)  # Exclude "id" from conflict check
+      if (length(conflict_cols) > 0) {
+        new_final_names <- make.unique(final_col_names)
+        setnames(summary_dt_final, old = final_col_names, new = new_final_names)
+      }
       
       # Merge summaries
       summary_dt_final <- merge(summary_dt_final, summary_dt_sleep, by = "id", all.x = TRUE)
@@ -262,28 +267,28 @@ server <- function(input, output, session) {
   }
 
   process_days <- function(num_days, bout_dt, summary_dt_final) {
-  for (day in 1:num_days) {
-    start_time <- days(day - 1)
-    end_time <- start_time + hours(12)
-    
-    # Extracting the bouts for the current day
-    bout_dt_current_day <- bout_dt[t %between% c(start_time, end_time)]
-    bout_dt_current_day[, t := t - start_time]
-    
-    # Summary for the current day
-    bout_summary <- bout_dt_current_day[, .(
-      latency = t[1],
-      first_bout_length = duration[1],
-      latency_to_longest_bout = t[which.max(duration)]
-    ), by = id]
-    
-    # Renaming columns for the current day
-    setnames(bout_summary, c("latency", "first_bout_length", "latency_to_longest_bout"), 
-             c(paste0("Day", day, "_latency"), paste0("Day", day, "_first_bout_length"), paste0("Day", day, "_latency_to_longest_bout")))
-    
-    # Merging with the final summary data table
-    summary_dt_final <- merge(summary_dt_final, bout_summary, by = "id")
-  }
+    for (day in 1:num_days) {
+      start_time <- days(day - 1)
+      end_time <- start_time + hours(12)
+      
+      # Extracting the bouts for the current day
+      bout_dt_current_day <- bout_dt[t %between% c(start_time, end_time)]
+      bout_dt_current_day[, t := t - start_time]
+      
+      # Summary for the current day
+      bout_summary <- bout_dt_current_day[, .(
+        latency = t[1],
+        first_bout_length = duration[1],
+        latency_to_longest_bout = t[which.max(duration)]
+      ), by = id]
+      
+      # Renaming columns for the current day
+      setnames(bout_summary, c("latency", "first_bout_length", "latency_to_longest_bout"),
+        c(paste0("Day", day, "_latency"), paste0("Day", day, "_first_bout_length"), paste0("Day", day, "_latency_to_longest_bout")))
+      
+      # Merging with the final summary data table
+      summary_dt_final <- merge(summary_dt_final, bout_summary, by = "id")
+    }
   return(summary_dt_final)
 }
   
@@ -350,11 +355,10 @@ server <- function(input, output, session) {
         dt <- behavr(dt_curated_final, metadata_proc)
 
         summary_dt_final <- rejoin(dt[, .(sleep_fraction = mean(asleep)), by = id])
-        # day night phase calculation
+
         dt[, phase := ifelse(t %% hours(24) < hours(12), "L", "D")]
 
-        # data summary: ERROR NEED TO FiX
-        
+        message("Calculations complete!")
       })
 
       output$status <- renderText({
@@ -480,7 +484,7 @@ server <- function(input, output, session) {
         observeEvent(input$zt_bins, {
           
           message(paste("Creating bins..."))
-          summary_dt_final <- ZTbins(dt, summary_dt_final, input$zt_bins)
+          summary_dt_final <- ZTbins(dt, summary_dt_final, input$zt_bins) # Duplicated column names.
 
           message(paste("Bout calculations..."))
           bout_dt <- bout_analysis(asleep, dt)
@@ -499,6 +503,9 @@ server <- function(input, output, session) {
 
           observeEvent(input$download_sleeppopbout, {
             filename <- paste0("generated_files/", batch_title, "_population_sleep_bout_wrap.pdf")
+            pdf(filename)
+            print(sleep_bout_wrap)
+            dev.off()
             showModal(modalDialog(
               title = "Download Complete",
               paste0("downloaded as generated_files/", batch_title, "_population_sleep_bout_wrap.pdf"),
@@ -507,13 +514,10 @@ server <- function(input, output, session) {
             ))
           })
 
-          #TODO... #ERROR!!!!!!!!
           message(paste("Processing Latency & Bout Lengths..."))
 
-
           # DEFINE PROCESS_DAYS FUNCTION
-          summary_dt_final <- process_days(num_days, bout_dt, summary_dt_final)
-          message(paste("the function works"))
+          summary_dt_final <- process_days(num_days, bout_dt, summary_dt_final)  ### duplicated column names.
 
           bout_dt_min <- bout_analysis(asleep, dt)[, .(
             id, duration = duration / 60, t = t / 60,
@@ -548,6 +552,8 @@ server <- function(input, output, session) {
               footer = NULL
             ))
           })
+
+          message("Summary table written!")
         })
       })
       
