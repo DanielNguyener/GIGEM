@@ -17,6 +17,7 @@ server <- function(input, output, session) {
   uploaded_files <- reactiveVal(NULL)
   metadata_proc <- reactiveVal(data.frame())
   batch_title <- reactiveVal()
+  summary_dt_final <- reactiveVal(data.table())
 
   
   observe({
@@ -291,12 +292,14 @@ server <- function(input, output, session) {
     }
   return(summary_dt_final)
 }
-  
+  # observation for creating summary table
+  # and sleep population plot.
   observe({
 
     req(input$meta_file)
     metadata <- read.csv(input$meta_file$datapath)
     metadata <- na.omit(metadata)
+    summary_dt_final <- data.table()
 
     updateSelectInput(session, "plot_choice", choices = unique(metadata$monitor))
 
@@ -559,8 +562,12 @@ server <- function(input, output, session) {
       
 
     })
+    
   })
 
+  # observation for selection of groups
+  # this will require the summary_dt_final, and batch_title,
+  # these two variables will HAVE to be reactive.
   observe({
     zt_bins_selected <- input$zt_bins
     
@@ -591,6 +598,8 @@ server <- function(input, output, session) {
       )
     )
   })
+
+
 
 
 }
