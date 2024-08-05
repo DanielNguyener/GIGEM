@@ -58,18 +58,18 @@ ui <- fluidPage(
           tabPanel("Deadcheck Plots",
             p("before you can download, you must click show plots."),
             actionButton("deadcheck_display", "Show Deadcheck Plots"),
-            actionButton("download_deadcheck", "Download PDFs"),
             h4("Before Deadcheck"),
             plotOutput("before_dead"),
             h4("After Deadcheck"),
             plotOutput("after_dead"),
+            actionButton("download_deadcheck", "Download PDFs"),
           ),
           tabPanel("SleepPop Plots",
             p("before you can download, you must click show plots."),
             actionButton("sleep_pop_display", "Show Sleep Population Plots"),
-            actionButton("download_sleeppop", "Download PDFs"),
             plotOutput("sleep_pop"),
             plotOutput("sleep_pop_wrap"),
+            actionButton("download_sleeppop", "Download PDFs"),
           ),
 
           tabPanel("Create Summary",
@@ -89,9 +89,51 @@ ui <- fluidPage(
             p("2. sleep fraction & time for: all, light, dark and all additional bins desired."),
             p("3. latency & bout values for each day."),
             actionButton("cal_sum", "Calculate Summary!"),
-            actionButton("download_sleeppopbout", "Download PDF"),
             actionButton("download_sum", "Download Summary CSV"),
-            plotOutput("sleep_bout_wrap")
+            plotOutput("sleep_bout_wrap"),
+            actionButton("download_sleeppopbout", "Download PDF"),
+          
+            checkboxGroupInput(
+              inputId = "groups",
+              label = "Select Groups to Analyze:",
+              choices = c("Sleep Time All" = "sleep_time_all",
+                          "Sleep Time L" = "sleep_time_l",
+                          "Sleep Time D" = "sleep_time_d",
+                          "N Bouts L" = "n_bouts_L",
+                          "N Bouts D" = "n_bouts_D",
+                          "Mean Bout Length L" = "mean_bout_length_L",
+                          "Mean Bout Length D" = "mean_bout_length_D",
+                          "")
+            ),
+
+            actionButton("norm_summary", "Create Normalized Values for all Monitors"),
+            actionButton("", "Download CSV"),
+            br(),
+            actionButton("stat_summary", "Create Statistics for all Treatments & Genotypes"),
+            actionButton("", "Download CSV"),
+            br(),
+            actionButton("norm_stat_summary", "Create Normalized Statistics for all Treatments & Genotypes"),
+            actionButton("", "Download CSV"),
+            br(),
+
+            p("select treatment for analysis"),
+            checkboxGroupInput(
+              inputId = "treatments",
+              label = "Treatments:",
+              choices = c(""),
+            ),
+            p("select genotype for analysis"),
+            checkboxGroupInput(
+              inputId = "genos",
+              label = "Genotypes:",
+              choices = c(""),
+            ),
+            
+            actionButton("specific_normstat", "Create Normalized Statistics for Specified Treatments/Genotypes"),
+            actionButton("", "Download CSV"),
+            br(),
+            actionButton("specific_norm", "Create Normalized Monitor Values for Specified Treatments/Genotypes"),
+            actionButton("", "Download CSV"),
           )
         )
       )

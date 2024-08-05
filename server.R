@@ -561,5 +561,36 @@ server <- function(input, output, session) {
     })
   })
 
+  observe({
+    zt_bins_selected <- input$zt_bins
+    
+    # Create dynamic choices based on selected ZT bins
+    additional_choices <- sapply(zt_bins_selected, function(bin) {
+      paste(bin)  # Create a label for each bin
+    }, simplify = FALSE)
+    
+    # Convert additional_choices to a named vector if needed
+    additional_choices_named <- setNames(
+      paste(zt_bins_selected),
+      zt_bins_selected
+    )
+    
+    # Update choices for 'groups'
+    updateCheckboxGroupInput(
+      session,
+      "groups",
+      choices = c(
+        "Sleep Time All" = "sleep_time_all",
+        "Sleep Time L" = "sleep_time_l",
+        "Sleep Time D" = "sleep_time_d",
+        "N Bouts L" = "n_bouts_L",
+        "N Bouts D" = "n_bouts_D",
+        "Mean Bout Length L" = "mean_bout_length_L",
+        "Mean Bout Length D" = "mean_bout_length_D",
+        additional_choices_named
+      )
+    )
+  })
+
 
 }
