@@ -78,12 +78,12 @@ ui <- fluidPage(
               inputId = "zt_bins",
               label = "Select ZT Bins:",
               choices = c(
-                "ZT 0-4" = "ZT_0_4",
-                "ZT 4-8" = "ZT_4_8",
-                "ZT 8-12" = "ZT_8_12",
-                "ZT 12-16" = "ZT_12_16",
-                "ZT 16-20" = "ZT_16_20",
-                "ZT 20-24" = "ZT_20_24"
+                "ZT 0-4" = "ZT0_4",
+                "ZT 4-8" = "ZT4_8",
+                "ZT 8-12" = "ZT8_12",
+                "ZT 12-16" = "ZT12_16",
+                "ZT 16-20" = "ZT16_20",
+                "ZT 20-24" = "ZT20_24"
               ),
             ),
             p("2. sleep fraction & time for: all, light, dark and all additional bins desired."),
@@ -107,13 +107,13 @@ ui <- fluidPage(
             ),
 
             actionButton("norm_summary", "Create Normalized Values for all Monitors"),
-            actionButton("", "Download CSV"),
+            actionButton("down_norm_sum", "Download CSV"),
             br(),
             actionButton("stat_summary", "Create Statistics for all Treatments & Genotypes"),
             actionButton("", "Download CSV"),
             br(),
             actionButton("norm_stat_summary", "Create Normalized Statistics for all Treatments & Genotypes"),
-            actionButton("", "Download CSV"),
+            actionButton("down_norm_stat", "Download CSV"),
             br(),
 
             p("select treatment for analysis"),

@@ -1,16 +1,21 @@
 # shinyServer.R
 
 # Packages Needed
-library(shiny)
-library(data.table)
-library(damr)
-library(ggetho)
-library(DT)
-library(sleepr)
+required_packages <- c("damr", "ggetho", "sleepr", "data.table", "zeallot", "plyr", "shiny", "DT")
+
+# Install and load required packages
+for (pkg in required_packages) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg, dependencies = TRUE)
+  }
+  library(pkg, character.only = TRUE)
+}
+
 source("helpers.R")
 
 # Increase upload size
 options(shiny.maxRequestSize=30*1024^2)
+
 
 server <- function(input, output, session) {
 
@@ -18,6 +23,7 @@ server <- function(input, output, session) {
   metadata_proc <- reactiveVal(data.frame())
   batch_title <- reactiveVal()
   summary_dt_final <- reactiveVal(data.table())
+  norm_factor <- reactiveVal(data.table())
 
   
   observe({
@@ -212,7 +218,7 @@ server <- function(input, output, session) {
   ZTbins <- function(dt, summary_dt_final, selected_bins) {
     
     # Convert selected bins to start hours
-    bin_hours <- as.numeric(gsub("ZT_(\\d+)_\\d+", "\\1", selected_bins))
+    bin_hours <- as.numeric(gsub("ZT(\\d+)_\\d+", "\\1", selected_bins))
     
     # Initialize list to store summary data
     summaries <- list()
@@ -291,7 +297,147 @@ server <- function(input, output, session) {
       summary_dt_final <- merge(summary_dt_final, bout_summary, by = "id")
     }
   return(summary_dt_final)
-}
+  }
+
+  generateNorms <- function(readin_summary_dt_final, normalized_factor, groups, geno, apply_genotype_filter) {
+    DT.list <- list()
+    for (group in groups) {
+      keep <- data.table()
+
+      for (i in unique(readin_summary_dt_final$genotype)) {
+        genotype_subset <- readin_summary_dt_final[genotype == i]
+
+        if (apply_genotype_filter) {
+          a <- normalized_factor[treatment %like% "Grp" & genotype == geno, ..group]
+        } else {
+          a <- normalized_factor[treatment %like% "Grp" & genotype == i, ..group]
+        }
+        
+        if (nrow(a) > 0) {
+          factor <- as.numeric(mean(a[[1]], na.rm = TRUE))  # Aggregate to single value
+        } else {
+          factor <- 1  # Default value if no data found
+        }
+
+        # Debugging information
+        print(paste("Factor length for genotype", i, ":", length(factor)))
+        print(paste("Length of .SD[[group]] for genotype", i, ":", nrow(genotype_subset)))
+        print(paste("Factor value:", factor))
+
+        if (length(factor) != 1) {
+          stop("Factor length mismatch")
+        }
+
+        new_col_name <- paste0("norm_", group)
+
+        # Normalize with correct length
+        genotype_subset[, (new_col_name) := .SD[[group]] / factor]
+        
+        keep <- rbind(keep, genotype_subset)
+      }
+      DT.list <- append(DT.list, list(keep))
+    }
+    return(DT.list)
+  }
+
+  generateSE <- function(data, groups, norm = FALSE){
+    #only add column for N values, once
+    N_col <- FALSE
+    if (norm){
+      suffix <- "norm_"
+    }else {
+      suffix <- ""
+    }
+    
+    # Loop through each group
+    for (group in groups) {
+      # Compute summary statistics for the current group
+      summary_group <- summarySE(data, measurevar = paste0(suffix, group), groupvars = c("genotype", "treatment"))
+      
+      if(N_col){
+        summary_group_subset <- summary_group[, c(1, 2, 4:7)]
+        summary_norm_common <- merge(summary_norm_common, summary_group_subset, by=c("genotype", "treatment"))
+      }else{
+        summary_norm_common <- summary_group
+        N_col <- TRUE
+      }
+    }
+    
+    return(summary_norm_common)
+  }
+
+  # this function will generate both norm_summary and stat_norm
+  # this function depends on both generateNorms and generateSE functions
+
+  normSummary <- function(batch_title, readin_summary_dt_final, groups, normalized_factor, geno) {
+    # Generate an empty data table
+    DT.list <- generateNorms(
+      readin_summary_dt_final,
+      normalized_factor,
+      groups,
+      geno,
+      apply_genotype_filter = FALSE
+    )
+    
+    # Check the structure of DT.list
+    print(lapply(DT.list, names))
+    
+    # Combine data tables
+    norm_keep <- do.call(cbind, c(
+      DT.list[1],
+      lapply(
+        DT.list[2:length(DT.list)],
+        function(x) x[, .SD, .SDcols = ncol(x)]
+      )
+    ))
+    
+    # Determine last columns
+    last_cols <- (ncol(norm_keep) - length(groups) + 1):ncol(norm_keep)
+    print(last_cols)
+    
+    # Subset data table
+    norm_keep <- norm_keep[, c(1:11, last_cols), with = FALSE]
+    
+    # Check resulting data table
+    print(head(norm_keep))
+
+    # summary_norm <- generateSE(norm_keep, groups, norm = TRUE)
+      
+    # return(list(norm_summary = norm_keep, stat_norm_summary = summary_norm))
+    
+    return(norm_keep)
+  }
+
+  # compute statistics function
+  summarySE <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE, conf.interval=.95, .drop=TRUE) {
+    # Handle NA's in length
+    length2 <- function (x, na.rm=FALSE) {
+      if (na.rm) sum(!is.na(x)) else length(x)
+    }
+    
+    # Calculate summary statistics
+    datac <- ddply(data, groupvars, .drop=.drop, .fun = function(xx, col) {
+      c(N = length2(xx[[col]], na.rm=na.rm),
+        mean = mean(xx[[col]], na.rm=na.rm),
+        sd = sd(xx[[col]], na.rm=na.rm))
+    }, measurevar)
+    
+    
+    # Rename columns
+    datac <- rename(datac, c("mean" = paste(measurevar, "mean",sep = "_")))
+    datac$se <- datac$sd / sqrt(datac$N)  # Standard error
+    ciMult <- qt(conf.interval/2 + .5, datac$N-1)  # Confidence interval multiplier
+    datac$ci <- datac$se * ciMult
+    
+    # Rename remaining columns
+    datac <- rename(datac, c("sd" = paste(measurevar, "sd",sep = "_")))
+    datac <- rename(datac, c("se" = paste(measurevar, "se",sep = "_")))
+    datac <- rename(datac, c("ci" = paste(measurevar, "ci",sep = "_")))
+    
+    return(datac)
+  }
+
+
   # observation for creating summary table
   # and sleep population plot.
   observe({
@@ -545,6 +691,9 @@ server <- function(input, output, session) {
           summary_dt_final <- merge(summary_dt_final, summary_bout_D[, .(id, n_bouts_D, mean_bout_length_D)], by = "id")
           summary_dt_final <- summary_dt_final[, -2]
 
+          # update the reactive val, outside of this observe bracket, for use in subsequent analysis.
+          summary_dt_final(summary_dt_final)
+
           observeEvent(input$download_sum, {
             write.csv(summary_dt_final, file = paste0("generated_files/summary_", batch_title, ".csv"), row.names = FALSE)
 
@@ -571,15 +720,10 @@ server <- function(input, output, session) {
   observe({
     zt_bins_selected <- input$zt_bins
     
-    # Create dynamic choices based on selected ZT bins
-    additional_choices <- sapply(zt_bins_selected, function(bin) {
-      paste(bin)  # Create a label for each bin
-    }, simplify = FALSE)
-    
     # Convert additional_choices to a named vector if needed
     additional_choices_named <- setNames(
-      paste(zt_bins_selected),
-      zt_bins_selected
+      paste0("sleep_time_", zt_bins_selected),  # Actual values with prefix
+      zt_bins_selected  # Labels to display
     )
     
     # Update choices for 'groups'
@@ -597,6 +741,53 @@ server <- function(input, output, session) {
         additional_choices_named
       )
     )
+
+    # dynamically update the groups.
+
+
+
+    observeEvent(input$norm_summary, {
+      req(input$groups)
+      groups <- input$groups
+      # when button pressed, generate a table of normalized values, and ability to download
+      # the table as a csv file.
+      message("Calculating normalized factors...")
+
+      # retrieve the data table from reactive value.
+      summary_dt_final <- summary_dt_final()
+      norm_factor <- summary_dt_final[, lapply(.SD, mean), by = .(genotype, treatment), .SDcols = groups]
+      message("Normalized factors calculated!")
+
+      print(head(norm_factor))
+      print(summary(norm_factor))
+       
+      # use normSummary function, this is a list of two tables.
+      results <- normSummary(batch_title, summary_dt_final, groups, norm_factor)
+      message("Normalized summary table written!")
+
+      observeEvent(input$down_norm_sum, {
+        write.csv(results, file = paste0("generated_files/norm_summary_", batch_title, ".csv"), row.names = FALSE)
+        
+        showModal(modalDialog(
+          title = "Download Complete",
+          paste0("downloaded as generated_files/norm_summary_", batch_title, ".csv"),
+          easyClose = TRUE,
+          footer = NULL
+        ))
+      })
+
+      # observeEvent(input$down_norm_stat, {
+      #   write.csv(results$stat_norm_summary, file = paste0("generated_files/stat_norm_summary_", batch_title, ".csv"), row.names = FALSE)
+      #   showModal(modalDialog(
+      #     title = "Download Complete",
+      #     paste0("downloaded as generated_files/stat_norm_summary_", batch_title, ".csv"),
+      #     easyClose = TRUE,
+      #     footer = NULL
+      #   ))
+      # })
+        
+
+    })
   })
 
 
