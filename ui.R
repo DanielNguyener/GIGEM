@@ -110,30 +110,30 @@ ui <- fluidPage(
             actionButton("down_norm_sum", "Download CSV"),
             br(),
             actionButton("stat_summary", "Create Statistics for all Treatments & Genotypes"),
-            actionButton("", "Download CSV"),
+            actionButton("down_stat_sum", "Download CSV"),
             br(),
             actionButton("norm_stat_summary", "Create Normalized Statistics for all Treatments & Genotypes"),
             actionButton("down_norm_stat", "Download CSV"),
             br(),
 
-            p("select treatment for analysis"),
-            checkboxGroupInput(
-              inputId = "treatments",
-              label = "Treatments:",
-              choices = c(""),
-            ),
-            p("select genotype for analysis"),
-            checkboxGroupInput(
-              inputId = "genos",
-              label = "Genotypes:",
-              choices = c(""),
-            ),
+            # p("select treatment for analysis"),
+            # checkboxGroupInput(
+            #   inputId = "treatments",
+            #   label = "Treatments:",
+            #   choices = c(""),
+            # ),
+            # p("select genotype for analysis"),
+            # checkboxGroupInput(
+            #   inputId = "genos",
+            #   label = "Genotypes:",
+            #   choices = c(""),
+            # ),
             
-            actionButton("specific_normstat", "Create Normalized Statistics for Specified Treatments/Genotypes"),
-            actionButton("", "Download CSV"),
-            br(),
-            actionButton("specific_norm", "Create Normalized Monitor Values for Specified Treatments/Genotypes"),
-            actionButton("", "Download CSV"),
+            # actionButton("specific_normstat", "Create Normalized Statistics for Specified Treatments/Genotypes"),
+            # actionButton("", "Download CSV"),
+            # br(),
+            # actionButton("specific_norm", "Create Normalized Monitor Values for Specified Treatments/Genotypes"),
+            # actionButton("", "Download CSV"),
           )
         )
       )

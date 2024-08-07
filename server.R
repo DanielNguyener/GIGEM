@@ -319,11 +319,6 @@ server <- function(input, output, session) {
           factor <- 1  # Default value if no data found
         }
 
-        # Debugging information
-        print(paste("Factor length for genotype", i, ":", length(factor)))
-        print(paste("Length of .SD[[group]] for genotype", i, ":", nrow(genotype_subset)))
-        print(paste("Factor value:", factor))
-
         if (length(factor) != 1) {
           stop("Factor length mismatch")
         }
@@ -379,9 +374,6 @@ server <- function(input, output, session) {
       apply_genotype_filter = FALSE
     )
     
-    # Check the structure of DT.list
-    print(lapply(DT.list, names))
-    
     # Combine data tables
     norm_keep <- do.call(cbind, c(
       DT.list[1],
@@ -390,23 +382,22 @@ server <- function(input, output, session) {
         function(x) x[, .SD, .SDcols = ncol(x)]
       )
     ))
-    
-    # Determine last columns
-    last_cols <- (ncol(norm_keep) - length(groups) + 1):ncol(norm_keep)
-    print(last_cols)
-    
-    # Subset data table
-    norm_keep <- norm_keep[, c(1:11, last_cols), with = FALSE]
-    
-    # Check resulting data table
-    print(head(norm_keep))
 
-    # summary_norm <- generateSE(norm_keep, groups, norm = TRUE)
-      
-    # return(list(norm_summary = norm_keep, stat_norm_summary = summary_norm))
+    # Identify columns after the 9th column
+    cols_after_ninth <- names(norm_keep)[10:ncol(norm_keep)]
     
+    # Filter columns that include "norm" in their name
+    norm_cols <- grep("norm", cols_after_ninth, value = TRUE)
+
+    # Create the final list of columns to keep, including the first 9 columns
+    final_cols <- c(names(norm_keep)[1:9], norm_cols)
+    
+    # Subset the data table to keep only the selected columns
+    norm_keep <- norm_keep[, ..final_cols]
+
+    # Return the result
     return(norm_keep)
-  }
+}
 
   # compute statistics function
   summarySE <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE, conf.interval=.95, .drop=TRUE) {
@@ -477,6 +468,7 @@ server <- function(input, output, session) {
         req(input$batch_title, input$num_days)
         message(paste("Calculating... Please Wait."))
         batch_title <- input$batch_title
+        batch_title(input$batch_title)
         num_days <- input$num_days
 
         dt_sleep <- load_dam(metadata_proc, FUN = sleepr::sleep_dam_annotation)
@@ -695,6 +687,7 @@ server <- function(input, output, session) {
           summary_dt_final(summary_dt_final)
 
           observeEvent(input$download_sum, {
+            
             write.csv(summary_dt_final, file = paste0("generated_files/summary_", batch_title, ".csv"), row.names = FALSE)
 
             showModal(modalDialog(
@@ -714,11 +707,12 @@ server <- function(input, output, session) {
     
   })
 
-  # observation for selection of groups
-  # this will require the summary_dt_final, and batch_title,
-  # these two variables will HAVE to be reactive.
-  observe({
+    # observation for selection of groups
+    # this will require the summary_dt_final, and batch_title,
+    # these two variables will HAVE to be reactive.
+    observe({
     zt_bins_selected <- input$zt_bins
+    batch_title <- batch_title()
     
     # Convert additional_choices to a named vector if needed
     additional_choices_named <- setNames(
@@ -741,53 +735,47 @@ server <- function(input, output, session) {
         additional_choices_named
       )
     )
+  })
 
-    # dynamically update the groups.
+  # Define a reactive value to store normalized summary
+  norm_sum <- reactiveVal()
 
+  # Generate normalized summary table
+  observeEvent(input$norm_summary, {
+    req(input$groups)
+    req(input$norm_summary)
+    req(summary_dt_final())
 
+    groups <- input$groups
+    batch_title <- input$batch_title
+    
+    message("Normalizing selected groups...")
+    # Retrieve the data table from reactive value
+    summary_dt_final_data <- summary_dt_final()
+    norm_factor <- summary_dt_final_data[, lapply(.SD, mean), by = .(genotype, treatment), .SDcols = groups]
+    
+    # Generate normalized summary
+    results <- normSummary(batch_title, summary_dt_final_data, groups, norm_factor)
+    norm_sum(results)  # Update reactive value
 
-    observeEvent(input$norm_summary, {
-      req(input$groups)
-      groups <- input$groups
-      # when button pressed, generate a table of normalized values, and ability to download
-      # the table as a csv file.
-      message("Calculating normalized factors...")
+    message("Normalization complete!")
+  })
 
-      # retrieve the data table from reactive value.
-      summary_dt_final <- summary_dt_final()
-      norm_factor <- summary_dt_final[, lapply(.SD, mean), by = .(genotype, treatment), .SDcols = groups]
-      message("Normalized factors calculated!")
-
-      print(head(norm_factor))
-      print(summary(norm_factor))
-       
-      # use normSummary function, this is a list of two tables.
-      results <- normSummary(batch_title, summary_dt_final, groups, norm_factor)
-      message("Normalized summary table written!")
-
-      observeEvent(input$down_norm_sum, {
-        write.csv(results, file = paste0("generated_files/norm_summary_", batch_title, ".csv"), row.names = FALSE)
-        
-        showModal(modalDialog(
-          title = "Download Complete",
-          paste0("downloaded as generated_files/norm_summary_", batch_title, ".csv"),
-          easyClose = TRUE,
-          footer = NULL
-        ))
-      })
-
-      # observeEvent(input$down_norm_stat, {
-      #   write.csv(results$stat_norm_summary, file = paste0("generated_files/stat_norm_summary_", batch_title, ".csv"), row.names = FALSE)
-      #   showModal(modalDialog(
-      #     title = "Download Complete",
-      #     paste0("downloaded as generated_files/stat_norm_summary_", batch_title, ".csv"),
-      #     easyClose = TRUE,
-      #     footer = NULL
-      #   ))
-      # })
-        
-
-    })
+  # Download normalized summary as CSV
+  observeEvent(input$down_norm_sum, {
+    req(norm_sum())  # Ensure results are available
+    batch_title <- input$batch_title
+    
+    # Write CSV file
+    file_path <- paste0("generated_files/norm_summary_", batch_title, ".csv")
+    write.csv(norm_sum(), file = file_path, row.names = FALSE)
+    
+    showModal(modalDialog(
+      title = "Download Complete",
+      paste0("Downloaded as ", file_path),
+      easyClose = TRUE,
+      footer = NULL
+    ))
   })
 
 
