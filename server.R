@@ -463,6 +463,7 @@ server <- function(input, output, session) {
 
     file.copy(fixUploadedFilesNames(input$monitor_files)$datapath, ".", recursive = TRUE, overwrite = TRUE)
     metadata_proc <- link_dam_metadata(metadata, result_dir = ".")
+    metadata_proc(metadata_proc)
     output$contents <- DT::renderDataTable(
       metadata,
       filter = list(position = "top", clear = FALSE, plain = TRUE)
@@ -740,6 +741,22 @@ server <- function(input, output, session) {
         "Mean Bout Length D" = "mean_bout_length_D",
         additional_choices_named
       )
+    )
+
+    meta_data_temp <- metadata_proc()
+
+    # Update choices for 'treatments'
+    updateCheckboxGroupInput(
+      session,
+      "treatments",
+      choices = unique(meta_data_temp$treatment)
+    )
+
+    # Update choices for 'genos'
+    updateCheckboxGroupInput(
+      session,
+      "genotypes",
+      choices = unique(meta_data_temp$genotype)
     )
   })
 

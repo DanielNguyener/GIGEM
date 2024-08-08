@@ -105,35 +105,28 @@ ui <- fluidPage(
                           "Mean Bout Length D" = "mean_bout_length_D",
                           "")
             ),
+            
+            checkboxGroupInput(
+              inputId = "treatments",
+              label = "Treatments:",
+              choices = c(""),
+            ),
+            checkboxGroupInput(
+              inputId = "genotypes",
+              label = "Genotypes:",
+              choices = c(""),
+            ),
 
-            actionButton("norm_summary", "Create Normalized Values for all Monitors"),
+            actionButton("norm_summary", "Create Normalized Values"),
             actionButton("down_norm_sum", "Download CSV"),
             br(),
-            actionButton("stat_summary", "Create Statistics for all Treatments & Genotypes"),
+            actionButton("stat_summary", "Create Statistics"),
             actionButton("down_stat_sum", "Download CSV"),
             br(),
-            actionButton("norm_stat_summary", "Create Normalized Statistics for all Treatments & Genotypes"),
+            actionButton("norm_stat_summary", "Create Statistics for Normalized Values"),
             actionButton("down_norm_stat", "Download CSV"),
             br(),
-
-            # p("select treatment for analysis"),
-            # checkboxGroupInput(
-            #   inputId = "treatments",
-            #   label = "Treatments:",
-            #   choices = c(""),
-            # ),
-            # p("select genotype for analysis"),
-            # checkboxGroupInput(
-            #   inputId = "genos",
-            #   label = "Genotypes:",
-            #   choices = c(""),
-            # ),
             
-            # actionButton("specific_normstat", "Create Normalized Statistics for Specified Treatments/Genotypes"),
-            # actionButton("", "Download CSV"),
-            # br(),
-            # actionButton("specific_norm", "Create Normalized Monitor Values for Specified Treatments/Genotypes"),
-            # actionButton("", "Download CSV"),
           )
         )
       )
