@@ -335,7 +335,7 @@ server <- function(input, output, session) {
     return(DT.list)
   }
 
-  generateSE <- function(data, groups, norm = FALSE){
+  generateSE <- function(data, groups, norm = FALSE) {
     #only add column for N values, once
     N_col <- FALSE
     if (norm){
@@ -349,10 +349,10 @@ server <- function(input, output, session) {
       # Compute summary statistics for the current group
       summary_group <- summarySE(data, measurevar = paste0(suffix, group), groupvars = c("genotype", "treatment"))
       
-      if(N_col){
+      if (N_col) {
         summary_group_subset <- summary_group[, c(1, 2, 4:7)]
         summary_norm_common <- merge(summary_norm_common, summary_group_subset, by=c("genotype", "treatment"))
-      }else{
+      }else {
         summary_norm_common <- summary_group
         N_col <- TRUE
       }
@@ -364,7 +364,7 @@ server <- function(input, output, session) {
   # this function will generate both norm_summary and stat_norm
   # this function depends on both generateNorms and generateSE functions
 
-  normSummary <- function(batch_title, readin_summary_dt_final, groups, normalized_factor, geno) {
+  normSummary <- function(readin_summary_dt_final, groups, normalized_factor, geno) {
     # Generate an empty data table
     DT.list <- generateNorms(
       readin_summary_dt_final,
@@ -394,13 +394,12 @@ server <- function(input, output, session) {
     
     # Subset the data table to keep only the selected columns
     norm_keep <- norm_keep[, ..final_cols]
-
     # Return the result
     return(norm_keep)
 }
 
   # compute statistics function
-  summarySE <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE, conf.interval=.95, .drop=TRUE) {
+  summarySE <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE, conf.interval=.95, .drop = TRUE) {
     # Handle NA's in length
     length2 <- function (x, na.rm=FALSE) {
       if (na.rm) sum(!is.na(x)) else length(x)
@@ -427,6 +426,13 @@ server <- function(input, output, session) {
     
     return(datac)
   }
+
+
+  statsSummary <- function(readin_summary_dt_final, groups, normalized_factor) {
+    stat_summary <- generateSE(readin_summary_dt_final, groups, norm = FALSE)
+    return(stat_summary)
+  }
+
 
 
   # observation for creating summary table
@@ -747,16 +753,18 @@ server <- function(input, output, session) {
     req(summary_dt_final())
 
     groups <- input$groups
-    batch_title <- input$batch_title
     
     message("Normalizing selected groups...")
     # Retrieve the data table from reactive value
     summary_dt_final_data <- summary_dt_final()
     norm_factor <- summary_dt_final_data[, lapply(.SD, mean), by = .(genotype, treatment), .SDcols = groups]
+
+    # update reactive norm_factor
+    norm_factor(norm_factor)
     
     # Generate normalized summary
-    results <- normSummary(batch_title, summary_dt_final_data, groups, norm_factor)
-    norm_sum(results)  # Update reactive value
+    norm_summary <- normSummary(summary_dt_final_data, groups, norm_factor)
+    norm_sum(norm_summary)  # Update reactive value
 
     message("Normalization complete!")
   })
@@ -764,6 +772,7 @@ server <- function(input, output, session) {
   # Download normalized summary as CSV
   observeEvent(input$down_norm_sum, {
     req(norm_sum())  # Ensure results are available
+    req(input$down_norm_sum)  # Ensure button is clicked
     batch_title <- input$batch_title
     
     # Write CSV file
@@ -776,6 +785,84 @@ server <- function(input, output, session) {
       easyClose = TRUE,
       footer = NULL
     ))
+  })
+
+  norm_stat_sum <- reactiveVal()
+
+  # generate statistics for normalized groups
+  observeEvent(input$norm_stat_summary, {
+    req(input$norm_stat_summary) # ensure button is clicked
+    req(norm_sum()) # ensure initial norm_summary has been generated
+    req(input$groups) # ensure gropus are selected
+
+    message("generating statistics for normalized groups...")
+    
+    # retrieve values.
+    groups <- input$groups
+    norm_summary <- norm_sum() # retrieve norm_summary from reactive value
+
+    # generate statistics for normalized groups
+    stat_norm_summary <- generateSE(norm_summary, groups, norm = TRUE)
+    norm_stat_sum(stat_norm_summary) # update reactive value
+
+    message("Normalization complete!")
+  })
+
+  observeEvent(input$down_norm_stat, {
+    # allow user to download csv for statistics generated for normalized values.
+    req(norm_stat_sum()) # ensure statistics have been generated
+    req(input$down_norm_stat) # ensure button is clicked
+    req(input$batch_title) # ensure batch title is available
+
+    batch_title <- input$batch_title
+
+    file_path <- paste0("generated_files/norm_stat_summary_", batch_title, ".csv")
+    write.csv(norm_stat_sum(), file = file_path, row.names = FALSE)
+    
+    showModal(modalDialog(
+      title = "Download Complete",
+      paste0("Downloaded as ", file_path),
+      easyClose = TRUE,
+      footer = NULL
+    ))
+
+  })
+
+  stat_sum <- reactiveVal()
+  # generate statistics for groups
+  observeEvent(input$stat_summary, {
+    req(input$stat_summary)
+    req(summary_dt_final())
+    req(input$groups)
+    req(norm_factor())
+
+    message("Generating Statistics...")
+
+    groups <- input$groups
+    summary_dt_final_data <- summary_dt_final()
+    stat_sumnary <- statsSummary(summary_dt_final_data, groups, norm_factor())
+    stat_sum(stat_sumnary)
+    
+    message("Statistics generated!")
+  })
+
+  observeEvent(input$down_stat_sum, {
+    req(input$down_stat_sum)
+    req(input$batch_title)
+    req(stat_sum())
+
+    batch_title <- input$batch_title
+    
+    file_path <- paste0("generated_files/stat_summary_", batch_title, ".csv")
+    write.csv(stat_sum(), file = file_path, row.names = FALSE)
+    
+    showModal(modalDialog(
+      title = "Download Complete",
+      paste0("Downloaded as ", file_path),
+      easyClose = TRUE,
+      footer = NULL
+    ))
+
   })
 
 
