@@ -1,7 +1,7 @@
 # shinyServer.R
 
 # Packages Needed
-required_packages <- c("damr", "ggetho", "sleepr", "data.table", "zeallot", "plyr", "shiny", "DT")
+required_packages <- c("damr", "ggetho", "sleepr", "data.table", "zeallot", "plyr", "shiny", "DT", "behavr", "RColorBrewer", "ggplot2")
 
 # Install and load required packages
 for (pkg in required_packages) {
@@ -19,15 +19,15 @@ options(shiny.maxRequestSize=30*1024^2)
 
 server <- function(input, output, session) {
 
-  uploaded_files <- reactiveVal(NULL)
-  metadata_proc <- reactiveVal(data.frame())
-  batch_title <- reactiveVal()
-  summary_dt_final <- reactiveVal(data.table())
-  norm_factor <- reactiveVal(data.table())
+  uploaded_files <- reactiveVal(NULL) # this is updated in Metadata Input tab
+  metadata_proc <- reactiveVal(data.frame()) # this is updated in Process Data tab
+  batch_title <- reactiveVal() # this is updated in Process Data tab
+  summary_dt_final <- reactiveVal() # this is only updated after generating ZT bins
+  norm_factor <- reactiveVal(data.table()) # this is only generated after clicking generate normSummary
+  dt_curated_final <- reactiveVal() # this will be used for sleep wrap plots
 
   
   observe({
-
 
     observeEvent(input$file1, {
       req(input$file1)
@@ -139,13 +139,11 @@ server <- function(input, output, session) {
     })
     
     # Display the metadata table with formatting
-    output$saved_files <- renderTable({
-      req(uploaded_files())
-      df <- uploaded_files()$metadata
-      df$region_id <- as.integer(df$region_id)
-      df$temp <- paste0(as.integer(df$temp), "°C")
-      df
-    })
+
+    output$saved_files <- DT::renderDataTable(
+      uploaded_files()$metadata,
+      filter = list(position = "top", clear = FALSE, plain = TRUE)
+    )
     
     # Save the metadata table as CSV
     observeEvent(input$save_csv, {
@@ -167,8 +165,12 @@ server <- function(input, output, session) {
     output$omit_rows <- renderUI({
       req(uploaded_files())
       df <- uploaded_files()$metadata
+
+      monitors_omit <- unique(df$monitor)
       tagList(
-        textInput("monitor_to_omit", "Monitor to Omit:"),
+        # textInput("monitor_to_omit", "Monitor to Omit:"),
+        selectInput("monitor_to_omit", "Monitor to Omit:", choices = monitors_omit),
+
         numericInput("region_id_to_omit", "Region ID to Omit:", value = 1, min = 1, step = 1),
         actionButton("omit", "Omit Selected Row")
       )
@@ -299,13 +301,17 @@ server <- function(input, output, session) {
   return(summary_dt_final)
   }
 
-  generateNorms <- function(readin_summary_dt_final, normalized_factor, groups, geno, apply_genotype_filter) {
+  generateNorms <- function(readin_summary_dt_final, normalized_factor, groups, geno, apply_genotype_filter, treatments, genotypes) {
     DT.list <- list()
+    
+    # Filter data based on selected treatments and genotypes
+    filtered_data <- readin_summary_dt_final[treatment %in% treatments & genotype %in% genotypes]
+
     for (group in groups) {
       keep <- data.table()
 
-      for (i in unique(readin_summary_dt_final$genotype)) {
-        genotype_subset <- readin_summary_dt_final[genotype == i]
+      for (i in unique(filtered_data$genotype)) {
+        genotype_subset <- filtered_data[genotype == i]
 
         if (apply_genotype_filter) {
           a <- normalized_factor[treatment %like% "Grp" & genotype == geno, ..group]
@@ -340,19 +346,22 @@ server <- function(input, output, session) {
     N_col <- FALSE
     if (norm){
       suffix <- "norm_"
-    }else {
+    } else {
       suffix <- ""
     }
+    
+    # Filter data based on groups
+    filtered_data <- data[, .SD, .SDcols = c("genotype", "treatment", paste0(suffix, groups))]
     
     # Loop through each group
     for (group in groups) {
       # Compute summary statistics for the current group
-      summary_group <- summarySE(data, measurevar = paste0(suffix, group), groupvars = c("genotype", "treatment"))
+      summary_group <- summarySE(filtered_data, measurevar = paste0(suffix, group), groupvars = c("genotype", "treatment"))
       
       if (N_col) {
         summary_group_subset <- summary_group[, c(1, 2, 4:7)]
         summary_norm_common <- merge(summary_norm_common, summary_group_subset, by=c("genotype", "treatment"))
-      }else {
+      } else {
         summary_norm_common <- summary_group
         N_col <- TRUE
       }
@@ -363,15 +372,16 @@ server <- function(input, output, session) {
 
   # this function will generate both norm_summary and stat_norm
   # this function depends on both generateNorms and generateSE functions
-
-  normSummary <- function(readin_summary_dt_final, groups, normalized_factor, geno) {
+  normSummary <- function(readin_summary_dt_final, groups, normalized_factor, treatments, genotypes) {
     # Generate an empty data table
     DT.list <- generateNorms(
       readin_summary_dt_final,
       normalized_factor,
       groups,
-      geno,
-      apply_genotype_filter = FALSE
+      geno = NULL,
+      apply_genotype_filter = FALSE,
+      treatments = treatments,
+      genotypes = genotypes
     )
     
     # Combine data tables
@@ -394,9 +404,9 @@ server <- function(input, output, session) {
     
     # Subset the data table to keep only the selected columns
     norm_keep <- norm_keep[, ..final_cols]
-    # Return the result
+    
     return(norm_keep)
-}
+  }
 
   # compute statistics function
   summarySE <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE, conf.interval=.95, .drop = TRUE) {
@@ -412,7 +422,6 @@ server <- function(input, output, session) {
         sd = sd(xx[[col]], na.rm=na.rm))
     }, measurevar)
     
-    
     # Rename columns
     datac <- rename(datac, c("mean" = paste(measurevar, "mean",sep = "_")))
     datac$se <- datac$sd / sqrt(datac$N)  # Standard error
@@ -427,13 +436,21 @@ server <- function(input, output, session) {
     return(datac)
   }
 
-
-  statsSummary <- function(readin_summary_dt_final, groups, normalized_factor) {
+  statsSummary <- function(readin_summary_dt_final, groups, normalized_factor, treatments, genotypes) {
+    # Subset the data based on selected treatments and genotypes
+    if (length(treatments) > 0) {
+      readin_summary_dt_final <- readin_summary_dt_final[treatment %in% treatments]
+    }
+      
+    if (length(genotypes) > 0) {
+      readin_summary_dt_final <- readin_summary_dt_final[genotype %in% genotypes]
+    }
+      
+    # Generate summary statistics for normalized groups
     stat_summary <- generateSE(readin_summary_dt_final, groups, norm = FALSE)
+      
     return(stat_summary)
   }
-
-
 
   # observation for creating summary table
   # and sleep population plot.
@@ -499,7 +516,8 @@ server <- function(input, output, session) {
         message(paste("removed_list2_", batch_title, ".csv written"))
 
         dt_curated_final <- dt_curated_2[t %between% c(days(0), days(num_days))]
-        
+        dt_curated_final(dt_curated_final)
+
         dt <- behavr(dt_curated_final, metadata_proc)
 
         summary_dt_final <- rejoin(dt[, .(sleep_fraction = mean(asleep)), by = id])
@@ -712,11 +730,14 @@ server <- function(input, output, session) {
 
     })
     
+    # Plot Data Tab:
+    # update genotype, and treatment choices
+    
   })
 
-    # observation for selection of groups
-    # this will require the summary_dt_final, and batch_title,
-    # these two variables will HAVE to be reactive.
+  # observation for selection of groups
+  # this will require the summary_dt_final, and batch_title,
+  # these two variables will HAVE to be reactive.
     observe({
     zt_bins_selected <- input$zt_bins
     batch_title <- batch_title()
@@ -758,9 +779,22 @@ server <- function(input, output, session) {
       "genotypes",
       choices = unique(meta_data_temp$genotype)
     )
+
+    updateSelectInput(
+      session,
+      "geno_plot",
+      choices = unique(meta_data_temp$genotype)
+    )
+
+    updateCheckboxGroupInput(
+      session,
+      "treat_plot",
+      choices = unique(meta_data_temp$treatment)
+    )
   })
 
-  # Define a reactive value to store normalized summary
+  # Define a reactive value to store normalized summary, which will be used
+  # in download button, AND norm_stat_summary.
   norm_sum <- reactiveVal()
 
   # Generate normalized summary table
@@ -768,8 +802,12 @@ server <- function(input, output, session) {
     req(input$groups)
     req(input$norm_summary)
     req(summary_dt_final())
+    req(input$treatments)
+    req(input$genotypes)
 
     groups <- input$groups
+    treatments <- input$treatments
+    genotypes <- input$genotypes
     
     message("Normalizing selected groups...")
     # Retrieve the data table from reactive value
@@ -780,7 +818,7 @@ server <- function(input, output, session) {
     norm_factor(norm_factor)
     
     # Generate normalized summary
-    norm_summary <- normSummary(summary_dt_final_data, groups, norm_factor)
+    norm_summary <- normSummary(summary_dt_final_data, groups, norm_factor, treatments, genotypes)
     norm_sum(norm_summary)  # Update reactive value
 
     message("Normalization complete!")
@@ -804,23 +842,30 @@ server <- function(input, output, session) {
     ))
   })
 
+  # reactive value for download
   norm_stat_sum <- reactiveVal()
 
   # generate statistics for normalized groups
   observeEvent(input$norm_stat_summary, {
-    req(input$norm_stat_summary) # ensure button is clicked
-    req(norm_sum()) # ensure initial norm_summary has been generated
-    req(input$groups) # ensure gropus are selected
+    req(input$norm_stat_summary) # Ensure button is clicked
+    req(norm_sum()) # Ensure initial norm_summary has been generated
+    req(input$groups) # Ensure groups are selected
+    req(input$treatments) # Ensure treatments are selected
+    req(input$genotypes) # Ensure genotypes are selected
 
     message("generating statistics for normalized groups...")
     
     # retrieve values.
     groups <- input$groups
-    norm_summary <- norm_sum() # retrieve norm_summary from reactive value
+    treatments <- input$treatments
+    genotypes <- input$genotypes
+    summary_dt_final_data <- summary_dt_final()
+    norm_summary <- norm_sum()
 
-    # generate statistics for normalized groups
-    stat_norm_summary <- generateSE(norm_summary, groups, norm = TRUE)
-    norm_stat_sum(stat_norm_summary) # update reactive value
+    stat_summary <- generateSE(norm_summary, groups, norm = TRUE)
+
+    #update reacive value for download.
+    norm_stat_sum(stat_summary)
 
     message("Normalization complete!")
   })
@@ -847,19 +892,26 @@ server <- function(input, output, session) {
 
   stat_sum <- reactiveVal()
   # generate statistics for groups
+
   observeEvent(input$stat_summary, {
-    req(input$stat_summary)
-    req(summary_dt_final())
-    req(input$groups)
-    req(norm_factor())
+    req(input$stat_summary)  # Ensure button is clicked
+    req(summary_dt_final()) # Ensure data is available
+    req(input$groups)       # Ensure groups are selected
+    req(input$treatments)   # Ensure treatments are selected
+    req(input$genotypes)    # Ensure genotypes are selected
+    req(norm_factor())      # Ensure normalization factors are available
 
     message("Generating Statistics...")
 
     groups <- input$groups
+    treatments <- input$treatments
+    genotypes <- input$genotypes
     summary_dt_final_data <- summary_dt_final()
-    stat_sumnary <- statsSummary(summary_dt_final_data, groups, norm_factor())
-    stat_sum(stat_sumnary)
     
+
+    stat_summary <- statsSummary(summary_dt_final_data, groups, norm_factor(), treatments, genotypes)
+    stat_sum(stat_summary)
+
     message("Statistics generated!")
   })
 
@@ -882,7 +934,73 @@ server <- function(input, output, session) {
 
   })
 
+  reactiveSleepWrap <- reactive({
+    req(input$geno_plot)
+    req(input$treat_plot)
+    req(input$norm_plot)
 
+    dt_curated_final <- dt_curated_final()
 
+    # Filter by genotype
+    filtered_data <- dt_curated_final[xmv(genotype) == input$geno_plot]
+    
+    # Filter by multiple treatments
+    if (length(input$treat_plot) > 0) {
+      filtered_data <- filtered_data[xmv(treatment) %in% input$treat_plot]
+    }
 
+    filtered_data
+  })
+
+  # Reactive expression for treatment colors
+  treatmentColors <- reactive({
+    req(input$geno_plot)
+    req(input$treat_plot)
+    req(input$norm_plot)
+    
+    treatments <- input$treat_plot
+    
+    if (is.null(treatments) || length(treatments) == 0) {
+      return(c())  # Return an empty vector if no treatments are selected
+    }
+    
+    num_colors <- length(treatments)
+    
+    # Combine colors from multiple palettes
+    palette1 <- RColorBrewer::brewer.pal(9, "Set1")
+    palette2 <- RColorBrewer::brewer.pal(8, "Set2")
+    colors <- c(palette1, palette2)[1:num_colors]
+    
+    # Create a named vector of colors
+    color_vector <- setNames(colors, treatments)
+    color_vector
+  })
+
+  # Render plot output
+  output$pop_sleep_wrap <- renderPlot({
+    req(input$save_process)
+    req(input$geno_plot)
+    req(input$treat_plot)
+    req(input$norm_plot)
+
+    batch_title <- input$batch_title
+    filtered_data <- reactiveSleepWrap()
+    color_vector <- treatmentColors()
+
+    ggetho(filtered_data,
+          aes(y = asleep * 100, colour = treatment), time_wrap = hours(24)) +
+      stat_pop_etho() +
+      scale_y_continuous(name = "Sleep (%)", limits = c(0, 100), expand = c(0, 0)) +
+      scale_colour_manual(values = color_vector, breaks = names(color_vector),
+                          labels = names(color_vector),
+                          aesthetics = c("colour", "fill")) +
+      # stat_ld_annotations() +
+      facet_grid(genotype ~ .) +
+      ggtitle(paste0(batch_title, "_", input$geno_plot)) +
+      theme(
+        title = element_text(size = 6, face = "bold"),
+        axis.title.y = element_blank(),
+        legend.position = "top"
+      )
+  })
 }

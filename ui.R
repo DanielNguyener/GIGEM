@@ -12,23 +12,33 @@ ui <- fluidPage(
     fluid = TRUE,
     collapsible = TRUE,
 
+    # Upload Metadata
     tabPanel(
       title = "Metadata Input",
       
-      fileInput("file1", "Choose Text Files", multiple = TRUE, accept = c("text/plain", ".txt")),
-      
-      h3("Enter Metadata"),
+      fileInput("file1", "Upload Monitor Files", multiple = TRUE, accept = c("text/plain", ".txt")),
       uiOutput("metadata_inputs"),
       
-      h3("Saved Files Metadata"),
-      tableOutput("saved_files"),
-      
-      actionButton("save_csv", "Save Metadata as CSV"),
+      br(),
 
-      h3("Omit Monitor & Region_ID Combinations"),
-      uiOutput("omit_rows")
+      tabsetPanel(
+        tabPanel(title = "View Saved Metadata",
+          # tableOutput("saved_files"),
+          DT::dataTableOutput("saved_files")
+        ),
+        # tabPanel(title = "Omit Cuvettes",
+          
+        # )
+      ),
+
+      br(),
+      uiOutput("omit_rows"),
+      br(),
+      actionButton("save_csv", "Save Metadata as CSV"),
+      br(),
     ),
 
+    # Process Data
     tabPanel(
       title = "Process Data",
       sidebarPanel(
@@ -130,6 +140,46 @@ ui <- fluidPage(
           )
         )
       )
+    ),
+
+    # Plot Data
+    tabPanel(
+      title = "Plot Data",
+      sidebarPanel(
+        selectInput(
+          inputId = "geno_plot",
+          label = "Select Genotype",
+          choices = c(""),
+        ),
+
+        checkboxGroupInput(
+          inputId = "treat_plot",
+          label = "Select Treatment",
+          choices = c(""),
+        ),
+
+        radioButtons(
+          inputId = "norm_plot",
+          label = "Normalized?",
+          choices = c("Yes", "No"),
+          selected = "No"
+        )
+      ),
+
+
+      mainPanel(
+        tabsetPanel(
+          tabPanel(
+            "Population Sleep Wrap",
+        
+            plotOutput(
+              outputId = "pop_sleep_wrap"
+            )
+
+          )
+        )
+      )
+
     )
   )
 )
